@@ -19,7 +19,7 @@ alone does not scope cwd.
 | **Package managers** | npm, pnpm, yarn, pip, cargo — when spec requires |
 | **Scripts** | make, ./scripts/*, just |
 
-**Model:** `kimi-k2.7-code` default. `gpt-5.6-terra` high for merge conflicts,
+**Model:** `gpt-5.6-luna` low default. `gpt-5.6-terra` medium for merge conflicts,
 `gh` judgment, PR base choice.
 
 **Commit** (`git add` + message) — separate worker type

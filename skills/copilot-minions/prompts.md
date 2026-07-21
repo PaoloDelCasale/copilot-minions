@@ -25,7 +25,7 @@ If a discipline skill says "check with the user" / "interview" / "quiz", that st
 
 ## explore
 
-Delegated repo facts. `agent_type: explore`, model `kimi-k2.7-code`.
+Delegated repo facts. `agent_type: explore`, model `gpt-5.6-luna` high.
 
 ```
 Task ID: <id>
@@ -78,7 +78,7 @@ Working directory (absolute):
 Constraints:
 - Scoped: every shell/git call uses cwd = path above; preflight pwd/branch/HEAD (worktrees.md Scoped cwd)
 - Edit only Files (+ direct imports/callers)
-- Context beyond Files → at most ONE explore (kimi-k2.7-code), then edit
+- Context beyond Files → at most ONE explore (`gpt-5.6-luna` high), then edit
 - Max 1 explore per task
 - Verify gate: lint / test / typecheck must pass before DONE — not done until verify passes
 - Commit before DONE — git add task files, conventional message referencing issue ID. Do not push.
@@ -93,7 +93,7 @@ STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | NEEDS_USER_INPUT | BLOCKED
 
 ## review
 
-`agent_type: code-review`, model `claude-opus-4.8`.
+`agent_type: code-review`, model `gpt-5.6-sol` low.
 
 ```
 Task ID: <id>
@@ -162,11 +162,7 @@ STATUS: DONE | BLOCKED
 ## commit
 
 Post-review — **second commit**. Runs after `REVIEW_APPROVED`.
-`agent_type: task`, model `kimi-k2.7-code`.
-
-```
-Task ID: <id>
-Type: commit
+`agent_type: task`, model `gpt-5.6-luna` low.
 
 Fixed point: <SHA>
 Issue: <#123, if any>
@@ -188,7 +184,7 @@ STATUS: DONE
 
 ## shell
 
-`agent_type: task`, model `kimi-k2.7-code` (or `gpt-5.6-terra` high for judgment).
+`agent_type: task`, model `gpt-5.6-luna` low (or `gpt-5.6-terra` medium for judgment).
 
 ```
 Task ID: <id>
@@ -217,7 +213,7 @@ STATUS: DONE | NEEDS_USER_INPUT | BLOCKED
 ## worktree-setup
 
 Runs from the **repo root** (not the new worktree). Subsequent spawns use the
-worktree absolute path. `agent_type: task`, model `kimi-k2.7-code`.
+worktree absolute path. `agent_type: task`, model `gpt-5.6-luna` low.
 
 ```
 Task ID: <id>

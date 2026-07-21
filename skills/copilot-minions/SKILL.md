@@ -12,7 +12,7 @@ description: >-
 
 # copilot-minions
 
-**Dispatch-only frontier** (recommended session model `gpt-5.6-sol` high):
+**Dispatch-only frontier** (recommended session model `gpt-5.6-sol` medium):
 decompose, spawn, **board**, triage **inbox** STATUS. Workers execute; you dispatch.
 
 Port of [`minion-orchestrator`](https://github.com/lenniii/minion-orchestrator)

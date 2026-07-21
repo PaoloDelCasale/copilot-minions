@@ -15,7 +15,7 @@ handoff.
 
 | ID | Type | Phase | Status | Blocked by | Notes |
 |----|------|-------|--------|------------|-------|
-| T1 | implement | review | in-flight | — | `add-auth` · `/abs/.worktrees/add-auth` · #42 · sonnet-5 · agent add-auth-1 |
+| T1 | implement | review | in-flight | — | `add-auth` · `/abs/.worktrees/add-auth` · #42 · luna-xhigh · agent add-auth-1 |
 
 **Notes:** worktree, branch, `based-on:` (blocker ID if stacked), `fixed:` (base
 SHA in worktree), issue #, model, `round:` (review count, max 5), spawn/agent ID,

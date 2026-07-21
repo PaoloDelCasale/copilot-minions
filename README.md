@@ -37,16 +37,21 @@ grill→build, planning→issues.
 
 ## Model stack
 
-| Role | Model | `task` agent_type |
-|------|-------|-------------------|
-| Frontier (session) | `gpt-5.6-sol` high | — |
-| Mechanical / shell / commit / explore | `kimi-k2.7-code` | `task` / `explore` |
-| Complex implement / UI | `claude-sonnet-5` high | `general-purpose` |
-| Review | `claude-opus-4.8` | `code-review` |
-| PRD / issues | `gpt-5.6-terra` high | `general-purpose` |
+**All-GPT-5.6 single family** (Sol / Terra / Luna) — usage-based AI credits.
 
-Escalation: `kimi-k2.7-code` → `claude-sonnet-5` high → `claude-opus-4.8` →
-split/ask. Details: `skills/copilot-minions/models.md`. Rationale:
+| Role | Model | Reasoning | `task` agent_type |
+|------|-------|-----------|-------------------|
+| Frontier (session) | `gpt-5.6-sol` | medium | — |
+| Mechanical / commit / shell / worktree | `gpt-5.6-luna` | low | `task` |
+| Explore | `gpt-5.6-luna` | high | `explore` |
+| Default implement (feature + tests) | `gpt-5.6-luna` | xhigh | `general-purpose` |
+| Complex up-front (arch, auth, migrations) | `gpt-5.6-sol` | medium | `general-purpose` |
+| Review | `gpt-5.6-sol` | low | `code-review` |
+| PRD / issues | `gpt-5.6-terra` | high | `general-purpose` |
+
+Escalation: `gpt-5.6-luna` xhigh → `gpt-5.6-terra` medium → `gpt-5.6-sol` medium →
+`gpt-5.6-sol` high/max → split/ask. Details: `skills/copilot-minions/models.md`.
+Rationale (incl. why Sonnet/Opus/Kimi were dropped):
 `skills/copilot-minions/model-rationale.md`.
 
 ## Skill layout

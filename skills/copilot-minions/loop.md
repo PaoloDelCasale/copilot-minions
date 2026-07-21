@@ -16,7 +16,7 @@ the first implement spawn.
 1. **Implement** — model per [`models.md`](models.md); prompt
    [`prompts.md`](prompts.md) implement. Implementer passes the **verify gate**
    (lint / test / typecheck) and **commits** before `DONE`.
-2. **Review** — fresh worker; `agent_type: code-review`, `claude-opus-4.8`; prompt
+2. **Review** — fresh worker; `agent_type: code-review`, `gpt-5.6-sol` low; prompt
    [`prompts.md`](prompts.md) review. Diff commits since `fixed:`
    (`git diff <fixed-point>...HEAD`). Reviewer does not re-run verify — trust the
    implementer's one-liner ([`models.md`](models.md)). Increment `round:` on board
@@ -48,8 +48,8 @@ discovers gaps:
 
 | Implement Model | Rule |
 |-----------------|------|
-| `kimi-k2.7-code` | Read/Grep on Files first; one explore (`kimi-k2.7-code`) for cross-module gaps |
-| `claude-sonnet-5` high | May delegate discovery to one explore (`kimi-k2.7-code`) before editing |
+| `gpt-5.6-luna` (quick / default implement) | Read/Grep on Files first; one explore (`gpt-5.6-luna` high) for cross-module gaps |
+| `gpt-5.6-sol` medium (complex) | May delegate discovery to one explore (`gpt-5.6-luna` high) before editing |
 
 Max 1 explore per task. `NEEDS_CONTEXT` → frontier respawns with the gap in
 `Spec` / `Files`.

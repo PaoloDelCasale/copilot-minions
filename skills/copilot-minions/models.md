@@ -3,31 +3,40 @@
 Copilot-CLI model routing. Cursor-only models from the original skill are
 remapped to Copilot models; rationale in [`model-rationale.md`](model-rationale.md).
 
+Copilot-CLI model routing. **All-GPT-5.6 single-family stack** — Cursor-only models
+from the original skill, and the earlier Sonnet/Opus/Kimi choices, are remapped to
+the GPT-5.6 family (Sol / Terra / Luna). Rationale in
+[`model-rationale.md`](model-rationale.md).
+
 | Role | Model |
 |------|-------|
-| **Frontier** | `gpt-5.6-sol` high — dispatch-only session model (recommendation; a skill cannot change the running session model) — see [`frontier.md`](frontier.md) |
+| **Frontier** | `gpt-5.6-sol` medium — dispatch-only session model (recommendation; a skill cannot change the running session model) — see [`frontier.md`](frontier.md) |
 | **Worker** | Per routing below |
 
-Record the worker model in the board `Notes`.
+Record the worker model **and reasoning effort** in the board `Notes`.
 
 ## Route workers
 
-| Work | Model | `task` agent_type |
-|------|-------|-------------------|
-| Bulk / mechanical implement | `kimi-k2.7-code` | `general-purpose` |
-| Complex implement / user-facing UI | `claude-sonnet-5` high | `general-purpose` |
-| Review | `claude-opus-4.8` | `code-review` |
-| PRD / issues synthesis | `gpt-5.6-terra` high | `general-purpose` |
-| Commit | `kimi-k2.7-code` | `task` |
-| Shell — PR / `gh` / worktrees / push / issue fetch | `kimi-k2.7-code` | `task` |
-| Explore (delegated) | `kimi-k2.7-code` | `explore` |
-| Shell — merge conflicts, `gh` judgment | `gpt-5.6-terra` high | `task` |
+| Work | Model | Reasoning | `task` agent_type |
+|------|-------|-----------|-------------------|
+| Mechanical / bulk (commit, rename, spacing, wiring) | `gpt-5.6-luna` | low | `general-purpose` |
+| Explore (delegated repo facts) | `gpt-5.6-luna` | high | `explore` |
+| Quick implement (small, well-defined, 1–2 files) | `gpt-5.6-luna` | high | `general-purpose` |
+| **Default implement** (feature / bug fix with tests + validation) | `gpt-5.6-luna` | **xhigh** | `general-purpose` |
+| Complex up-front (architecture, auth, payments, migrations, tricky logic) | `gpt-5.6-sol` | medium | `general-purpose` |
+| Review | `gpt-5.6-sol` | low | `code-review` |
+| PRD / issues synthesis | `gpt-5.6-terra` | high | `general-purpose` |
+| Commit / shell — PR / `gh` / worktrees / push / issue fetch | `gpt-5.6-luna` | low | `task` |
+| Shell — merge conflicts, `gh` judgment | `gpt-5.6-terra` | medium | `task` |
 
 Notes:
-- `kimi-k2.7-code` does **not** support the `reasoning_effort` parameter and runs
-  at context tier `default` — fine for mechanical work.
+- **Reasoning effort is mandatory** on every spawn (Luna/Sol/Terra all accept it) —
+  pass `reasoning_effort` on the `task` call. Getting effort right is the main cost
+  lever: too low → verify-fail → escalate → pay twice; too high → wasted tokens.
 - The `code-review` agent type is Copilot's dedicated reviewer; pin it to
-  `claude-opus-4.8` for strict, high-signal review.
+  `gpt-5.6-sol` low — Sol's judgment at low effort is strong and cheap enough for
+  a diff pass (an independent Sol reviewer over a Luna implementer catches the
+  cheap-model slips).
 - Every spawn uses `mode: "background"` (async inbox).
 
 **Verify gate** — implementers and fix-review run lint / test / typecheck before
@@ -35,13 +44,23 @@ Notes:
 
 ## Escalation
 
-One tier on mediocre output, verify failure, or `BLOCKED`:
+One tier on mediocre output, verify failure, or `BLOCKED`. The ladder climbs by
+**model and effort together**:
 
-`kimi-k2.7-code` → `claude-sonnet-5` high → `claude-opus-4.8` → split or ask user.
+`gpt-5.6-luna` xhigh → `gpt-5.6-terra` medium → `gpt-5.6-sol` medium → `gpt-5.6-sol` high/max → split or ask user.
 
-Complex implement starts on `claude-sonnet-5` high; on trouble escalate to
-`claude-opus-4.8`; respawn fresh — never resume ([`loop.md`](loop.md) Respawn).
+Default implement starts on `gpt-5.6-luna` xhigh (cost-optimized daily driver — see
+[`model-rationale.md`](model-rationale.md)); on verify-fail / mediocre output escalate
+to `gpt-5.6-terra` medium, then `gpt-5.6-sol` medium, then `gpt-5.6-sol` high/max;
+respawn fresh — never resume ([`loop.md`](loop.md) Respawn).
 
-Never escalate the frontier — `gpt-5.6-sol` is dispatch-only.
+**Start higher up-front** when the frontier judges a task complex before spawning —
+architecture, auth, payments, migrations, cross-cutting logic go **straight to
+`gpt-5.6-sol` medium** (don't pay a throwaway Luna attempt on work that clearly needs
+Sol). Luna's sweet spot is well-scoped, clearly-specified slices — which good
+tracer-bullet decomposition + a tight spawn spec provide.
+
+Never escalate the frontier — `gpt-5.6-sol` medium is dispatch-only (bump to
+high/max manually only for an unusually hard decomposition).
 
 User says "use X" → override for that batch.

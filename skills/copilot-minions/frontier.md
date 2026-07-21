@@ -2,12 +2,12 @@
 
 **Branch:** planning | orchestration (dispatch rules apply to both)
 
-**Dispatch-only frontier** — recommended session model `gpt-5.6-sol` high. **Tight**
+**Dispatch-only frontier** — recommended session model `gpt-5.6-sol` medium. **Tight**
 turns: board, spawn specs, STATUS triage, short user Q&A.
 
 > In Copilot CLI the frontier is the **main session agent** (the one reading this
 > skill and calling `task`). A skill cannot change the session's model, so
-> `gpt-5.6-sol` high is a *recommendation* — run the orchestrator session with it.
+> `gpt-5.6-sol` medium is a *recommendation* — run the orchestrator session with it.
 > The skill still works with any capable session model.
 
 ## Frontier may do (only these)
@@ -36,12 +36,12 @@ drafts; a shell worker publishes after approval.
 
 ```
 grill (frontier, tight, via ask_user)
-  → explore worker (kimi-k2.7-code) if PRD/issues need repo facts
+  → explore worker (`gpt-5.6-luna` high) if PRD/issues need repo facts
   → prd worker (gpt-5.6-terra high) — context in prompt
   → frontier: confirm seams / PRD (short)
   → issues worker (gpt-5.6-terra high) — approved PRD in prompt
   → frontier: confirm granularity / deps (short)
-  → shell worker (kimi-k2.7-code): publish
+  → shell worker (`gpt-5.6-luna` low): publish
   → orchestrate
 ```
 
