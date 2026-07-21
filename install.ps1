@@ -1,13 +1,13 @@
 #Requires -Version 5.0
 # Installs copilot-minions into the Copilot CLI user skills directory.
-# Copies skills/copilot-minions -> ~/.agents/skills/copilot-minions
+# Copies skills/copilot-minions -> ~/.copilot/skills/copilot-minions
 # Re-run after `git pull`.
 
 $ErrorActionPreference = 'Stop'
 
 $root   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $src    = Join-Path $root 'skills\copilot-minions'
-$skills = Join-Path $HOME '.agents\skills'
+$skills = Join-Path $HOME '.copilot\skills'
 $dest   = Join-Path $skills 'copilot-minions'
 
 if (-not (Test-Path $src)) {

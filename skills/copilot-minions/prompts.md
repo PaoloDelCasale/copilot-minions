@@ -13,6 +13,16 @@ Every spawn: `mode: "background"`. Pass each block as the `task` `prompt`; set
 the worker loads that skill if available (invoke the `skill` tool with the name),
 otherwise follows the inline `Constraints` as fallback.
 
+**Global rule — workers never talk to the user (applies to every template below).**
+A spawned worker is a background agent. It **must not** call `ask_user`, open
+interactive prompts, or wait for human input — in the app those land in an ephemeral
+agent tab the user cannot reliably reopen, so the question gets lost. When a worker
+needs a human decision it **stops and returns `STATUS: NEEDS_USER_INPUT`** with a
+one-line question. Only the **frontier** (stable main thread) relays that question to
+the user via `ask_user`, then respawns the worker with the answer folded into `Spec`.
+If a discipline skill says "check with the user" / "interview" / "quiz", that step is
+**overridden** to STATUS surfacing.
+
 ## explore
 
 Delegated repo facts. `agent_type: explore`, model `kimi-k2.7-code`.
@@ -34,10 +44,11 @@ Constraints:
 - Read-only
 - Scoped: run shell/git with cwd = path above (worktrees.md Scoped cwd)
 - Answer only; <=30 lines
+- Never call ask_user / interactive prompts — a human decision → STATUS: NEEDS_USER_INPUT (one-line question) to the frontier
 
 Output:
 <=15 lines. Summary + STATUS line only — no tables, no markdown essays.
-STATUS: DONE | BLOCKED
+STATUS: DONE | NEEDS_USER_INPUT | BLOCKED
 ```
 
 ## implement
@@ -73,10 +84,11 @@ Constraints:
 - Commit before DONE — git add task files, conventional message referencing issue ID. Do not push.
 - Stop before review — orchestrator spawns review; do not self-review
 - Insufficient context → STATUS: NEEDS_CONTEXT (one line)
+- Never call ask_user / interactive prompts — a human decision (unclear requirement, seam ambiguity) → STATUS: NEEDS_USER_INPUT (one-line question) to the frontier; do not guess and do not block silently
 
 Output:
 One line: commit SHA + message, verify one-liner, diff stat.
-STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
+STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | NEEDS_USER_INPUT | BLOCKED
 ```
 
 ## review
@@ -195,10 +207,11 @@ Constraints:
 - Scoped: every shell/git call uses cwd = path above (worktrees.md Scoped cwd)
 - Do not edit source unless spec says (e.g. conflict resolution)
 - Do not push / open PRs unless spec says
+- Never call ask_user / interactive prompts — a human decision → STATUS: NEEDS_USER_INPUT (one-line question) to the frontier
 
 Output:
 <=5 lines: outcome + key command output. No diagnostic essays.
-STATUS: DONE | BLOCKED
+STATUS: DONE | NEEDS_USER_INPUT | BLOCKED
 ```
 
 ## worktree-setup

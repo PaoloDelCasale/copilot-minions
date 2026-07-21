@@ -78,6 +78,7 @@ stays unread beyond the STATUS/summary.
 | `DONE` (implement, no SHA) | respawn implement — commit before `DONE` |
 | `DONE_WITH_CONCERNS` | accept or respawn |
 | `NEEDS_CONTEXT` | respawn implement with gap in `Spec` / `Files` |
+| `NEEDS_USER_INPUT` | frontier asks the user (one line via `ask_user`) → respawn worker with the answer in `Spec` — the worker must never ask the user directly |
 | `BLOCKED` | respawn (escalate tier per [`models.md`](models.md)), split, or ask user — never resume |
 | `REVIEW_APPROVED` | gate → final commit |
 | `REVIEW_CHANGES_REQUIRED` | fix-review → review again (max 5 reviews) |

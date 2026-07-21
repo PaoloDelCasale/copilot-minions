@@ -16,6 +16,7 @@ turns: board, spawn specs, STATUS triage, short user Q&A.
 |------|-----------|
 | **Grilling** | One question at a time (via `ask_user`, skill `grilling`); workers cannot see the thread |
 | **User Q&A** | Confirm seams, slice granularity, approve/reject drafts — one question per turn |
+| **Relay worker questions** | A worker `STATUS: NEEDS_USER_INPUT` → ask the user (via `ask_user`, one line), then respawn the worker with the answer folded into `Spec`. Workers never call `ask_user` themselves — only the frontier does |
 | **Dispatch** | Decompose, write spawn specs, triage STATUS + one line, post board |
 
 The frontier spawns workers only — no direct `view`, `grep`, `powershell`, or repo

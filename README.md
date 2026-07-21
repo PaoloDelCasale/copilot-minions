@@ -24,8 +24,9 @@ Linux / macOS:
 ./install.sh
 ```
 
-Copies `skills/copilot-minions/` into `~/.agents/skills/copilot-minions`. Re-run
-after `git pull`.
+Copies `skills/copilot-minions/` into `~/.copilot/skills/copilot-minions`. Re-run
+after `git pull`. Restart / reload your Copilot session afterwards so the skill
+appears in the `/` menu.
 
 ## Usage
 

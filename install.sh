@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # Installs copilot-minions into the Copilot CLI user skills directory.
-# Copies skills/copilot-minions -> ~/.agents/skills/copilot-minions
+# Copies skills/copilot-minions -> ~/.copilot/skills/copilot-minions
 # Re-run after `git pull`.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${ROOT}/skills/copilot-minions"
-SKILLS="${HOME}/.agents/skills"
+SKILLS="${HOME}/.copilot/skills"
 DEST="${SKILLS}/copilot-minions"
 
 if [ ! -d "${SRC}" ]; then
