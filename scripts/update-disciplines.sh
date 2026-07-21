@@ -1,34 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Keep the copilot-minions discipline skills current with mattpocock/skills.
-#
-# copilot-minions references (never forks) Matt Pocock's engineering skills. This
-# script clones/pulls mattpocock/skills into a portable cache and registers the
-# three disciplines that are not in Copilot's default personal set — implement,
-#   to-spec, to-tickets — as custom skills (directory references). Because they are
-# directory references to the cache, a weekly pull refreshes their content.
-#
-# Idempotent: safe to run repeatedly. Run manually, from install.sh, or from a
-# weekly Copilot scheduled workflow.
-#
-# Env overrides:
-#   CACHE_DIR   where to keep the checkout (default: ${XDG_CACHE_HOME:-~/.cache}/copilot-minions/mattpocock-skills)
-#   REF         git branch/ref to track (default: main)
+PLATFORM="copilot"
+if [[ $# -gt 0 ]]; then
+  if [[ $# -ne 2 || "$1" != "--platform" ]]; then
+    echo "Usage: $0 [--platform copilot|codex|all]" >&2
+    exit 2
+  fi
+  PLATFORM="$2"
+fi
+case "${PLATFORM}" in
+  copilot|codex|all) ;;
+  *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;;
+esac
 
-REPO_URL='https://github.com/mattpocock/skills.git'
+REPO_URL="https://github.com/mattpocock/skills.git"
 REF="${REF:-main}"
+INSTALL_HOME="${MINIONS_HOME:-$HOME}"
 CACHE_DIR="${CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/copilot-minions/mattpocock-skills}"
 DISCIPLINES=(implement to-spec to-tickets)
+
+selected() {
+  [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]
+}
 
 require() {
   command -v "$1" >/dev/null 2>&1 || { echo "$1 not found on PATH." >&2; exit 1; }
 }
-require git
-require copilot
 
-# --- 1. Clone or update the source -------------------------------------------
-if [ -d "${CACHE_DIR}/.git" ]; then
+require git
+if selected copilot; then
+  require copilot
+fi
+
+if [[ -d "${CACHE_DIR}/.git" ]]; then
   echo "Updating source: ${CACHE_DIR}"
   git -C "${CACHE_DIR}" fetch --quiet origin
   git -C "${CACHE_DIR}" reset --hard --quiet "origin/${REF}"
@@ -39,40 +44,60 @@ else
 fi
 echo "Source at ${REF} @ $(git -C "${CACHE_DIR}" rev-parse --short HEAD)"
 
-# --- 2. Register each discipline from the cache ------------------------------
-LIST_JSON="$(copilot skill list --json 2>/dev/null || echo '[]')"
+LIST_JSON="[]"
+if selected copilot; then
+  LIST_JSON="$(copilot skill list --json 2>/dev/null || echo '[]')"
+fi
 
-for d in "${DISCIPLINES[@]}"; do
-  dir="${CACHE_DIR}/skills/engineering/${d}"
-  if [ ! -d "${dir}" ]; then
-    echo "Warning: upstream no longer provides '${d}' at skills/engineering/${d} — skipping." >&2
+for discipline in "${DISCIPLINES[@]}"; do
+  source_dir="${CACHE_DIR}/skills/engineering/${discipline}"
+  if [[ ! -d "${source_dir}" ]]; then
+    echo "Warning: upstream no longer provides '${discipline}'; skipping." >&2
     continue
   fi
-  canonical="$(cd "${dir}" && pwd)"
+  canonical="$(cd "${source_dir}" && pwd -P)"
 
-  # Drop any stale custom registration of this skill that points elsewhere.
-  if command -v python3 >/dev/null 2>&1; then
-    while IFS= read -r stale; do
-      [ -n "${stale}" ] || continue
-      echo "Removing stale registration: ${stale}"
-      copilot skill remove "${stale}" >/dev/null 2>&1 || true
-    done < <(printf '%s' "${LIST_JSON}" | python3 -c '
+  if selected copilot; then
+    if command -v python3 >/dev/null 2>&1; then
+      while IFS= read -r stale; do
+        [[ -n "${stale}" ]] || continue
+        echo "Removing stale Copilot registration: ${stale}"
+        copilot skill remove "${stale}" >/dev/null 2>&1 || true
+      done < <(printf '%s' "${LIST_JSON}" | python3 -c '
 import json, sys
-name, canon = sys.argv[1], sys.argv[2]
+name, canonical = sys.argv[1], sys.argv[2]
 try:
-    data = json.load(sys.stdin)
+    entries = json.load(sys.stdin)
 except Exception:
-    data = []
-for s in data:
-    if s.get("name") == name and s.get("source") == "custom" and s.get("path") != canon:
-        print(s.get("path"))
-' "${d}" "${canonical}")
+    entries = []
+for entry in entries:
+    if entry.get("name") == name and entry.get("source") == "custom" and entry.get("path") != canonical:
+        print(entry.get("path"))
+' "${discipline}" "${canonical}")
+    fi
+    copilot skill add "${source_dir}" >/dev/null
+    echo "  Copilot: ${discipline} -> ${canonical}"
   fi
 
-  # Register from the cache (idempotent — re-adding the same dir is harmless).
-  copilot skill add "${dir}" >/dev/null
-  echo "  registered ${d} -> ${canonical}"
+  if selected codex; then
+    skills_dir="${INSTALL_HOME}/.agents/skills"
+    target="${skills_dir}/${discipline}"
+    mkdir -p "${skills_dir}"
+    if [[ -L "${target}" ]]; then
+      resolved="$(cd "${target}" && pwd -P)"
+      if [[ "${resolved}" != "${canonical}" ]]; then
+        echo "Codex discipline link points elsewhere: ${target} -> ${resolved}" >&2
+        exit 1
+      fi
+    elif [[ -e "${target}" ]]; then
+      echo "Refusing to replace unmanaged Codex discipline: ${target}" >&2
+      exit 1
+    else
+      ln -s "${canonical}" "${target}"
+    fi
+    echo "  Codex: ${discipline} -> ${canonical}"
+  fi
 done
 
-echo ""
-echo "Disciplines updated. Verify with: copilot skill list"
+echo
+echo "Disciplines updated for platform: ${PLATFORM}"

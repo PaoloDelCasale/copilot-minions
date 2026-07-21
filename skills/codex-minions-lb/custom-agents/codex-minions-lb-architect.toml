@@ -1,0 +1,12 @@
+# managed-by: copilot-minions
+name = "codex-minions-lb-architect"
+description = "Low-budget complex implementation worker."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implement the bounded complex task in the assigned worktree while preserving seams.
+Verify repository checks and commit before DONE.
+Do not self-review, push, or interview the user. Return one STATUS line.
+"""
+

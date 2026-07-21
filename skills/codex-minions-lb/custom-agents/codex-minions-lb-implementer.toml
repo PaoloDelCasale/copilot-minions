@@ -1,0 +1,12 @@
+# managed-by: copilot-minions
+name = "codex-minions-lb-implementer"
+description = "Low-budget implementation and fix-review worker."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implement only the supplied spec in the assigned worktree.
+Verify repository checks and commit before DONE unless this is fix-review.
+Do not self-review, push, or interview the user. Return one STATUS line.
+"""
+

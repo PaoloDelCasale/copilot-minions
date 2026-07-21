@@ -1,0 +1,13 @@
+# managed-by: copilot-minions
+name = "codex-minions-mechanical"
+description = "Command, git, commit, worktree, and mechanical wiring worker."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "low"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Execute only the bounded mechanical task from the parent.
+Keep every command scoped to the supplied working directory.
+Do not broaden source edits, publish, or push unless explicitly requested.
+Never interview the user. Return the requested concise output and one STATUS line.
+"""
+

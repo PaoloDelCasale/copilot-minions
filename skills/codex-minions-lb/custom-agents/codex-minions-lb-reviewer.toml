@@ -1,0 +1,12 @@
+# managed-by: copilot-minions
+name = "codex-minions-lb-reviewer"
+description = "Independent low-budget-profile reviewer for correctness risks."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+developer_instructions = """
+Review only the supplied fixed-point diff and acceptance criteria.
+Report high-confidence correctness, security, regression, or missing-test blockers.
+Do not edit, rerun verification, or interview the user. Return one STATUS line.
+"""
+

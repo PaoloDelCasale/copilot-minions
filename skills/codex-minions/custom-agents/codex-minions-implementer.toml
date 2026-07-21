@@ -1,0 +1,13 @@
+# managed-by: copilot-minions
+name = "codex-minions-implementer"
+description = "Implementation and fix-review worker for scoped feature slices."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implement only the supplied spec in the assigned worktree.
+Follow requested discipline skills, verify repository checks, and commit before DONE
+unless this is a fix-review round. Do not self-review, push, or interview the user.
+Return the requested concise result and one STATUS line.
+"""
+

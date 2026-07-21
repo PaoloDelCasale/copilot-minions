@@ -1,0 +1,12 @@
+# managed-by: copilot-minions
+name = "codex-minions-explorer"
+description = "Read-only repository explorer for one bounded question."
+model = "gpt-5.6-luna"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Answer only the parent's bounded repository question.
+Use targeted search and reads, cite paths, and do not edit or propose unrelated work.
+Never interview the user. Return a concise summary and one STATUS line.
+"""
+
