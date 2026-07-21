@@ -78,8 +78,36 @@ comes from **discipline skills** — mostly from
 [`mattpocock/skills`](https://github.com/mattpocock/skills): `grilling`, `tdd`,
 `code-review`, `implement`, `to-spec`, `to-tickets`, plus `codebase-design` /
 `domain-modeling` / `diagnosing-bugs`. Each worker loads its discipline if
-installed, else falls back to inline constraints. See
+installed, else falls back to inline constraints. copilot-minions **references**
+these skills (never forks them) and can keep them updated from upstream — see
+[Keeping disciplines updated](#keeping-disciplines-updated) and
 `skills/copilot-minions/disciplines.md`.
+
+## Keeping disciplines updated
+
+Three disciplines aren't in Copilot's default set — `implement`, `to-spec`,
+`to-tickets` (Matt renamed the last two from `to-prd` / `to-issues`). The bundled
+updater clones/pulls `mattpocock/skills` `main` into a portable cache and registers
+them as **custom skills** (directory references), so a plain `git pull` refreshes
+their content:
+
+```powershell
+scripts/update-disciplines.ps1        # Windows / PowerShell
+```
+```bash
+scripts/update-disciplines.sh         # macOS / Linux
+```
+
+`install.ps1` / `install.sh` call this automatically (non-fatal if offline).
+
+**Weekly auto-update (Copilot workflow).** Create a scheduled workflow that runs the
+updater once a week — e.g. a weekly workflow with the prompt:
+
+> Run `scripts/update-disciplines.ps1` (or `scripts/update-disciplines.sh`) from the
+> copilot-minions repo to refresh the discipline skills, then report what changed.
+
+Because registrations are directory references, the workflow only needs to pull and
+re-run the script; no re-install of copilot-minions itself is required.
 
 ## License
 

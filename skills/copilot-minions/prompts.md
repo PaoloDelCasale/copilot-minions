@@ -47,8 +47,11 @@ STATUS: DONE | BLOCKED
 ```
 Task ID: <id>
 Type: implement
-Discipline: load skill `implement` if available; else follow Constraints below.
-  Design seams → lean on `codebase-design` / `domain-modeling` if present.
+Discipline: load skill `implement` if available (invoke the skill tool with "implement");
+  else follow Constraints below. Copilot mapping: the skill's `/tdd` → skill `tdd`;
+  its `/review` step is SKIPPED here — the orchestrator runs review as a separate
+  worker (stop before review). Design seams → lean on `codebase-design` /
+  `domain-modeling` if present.
 
 Spec:
 <issue or excerpt — <=15 lines>
@@ -232,7 +235,11 @@ STATUS: DONE | BLOCKED
 ```
 Task ID: <id>
 Type: prd
-Discipline: load skill `to-spec` if available; else synthesize inline per Constraints.
+Discipline: load skill `to-spec` if available (invoke the skill tool with "to-spec";
+  older installs may name it "to-prd"); else synthesize inline per Constraints. Copilot overrides to the skill's own steps:
+  do NOT run `/setup-matt-pocock-skills`, do NOT publish to an issue tracker, and do
+  NOT "check with the user" — you are a background worker. Emit the PRD; the frontier
+  confirms seams with the user and the orchestrator publishes.
 
 Context:
 <grilling decisions, constraints — structured brief, not chat dump>
@@ -245,7 +252,7 @@ Seams (if pre-agreed):
 
 Constraints:
 - Synthesize — do not interview the user
-- Do not publish
+- Do not publish; do not require setup-matt-pocock-skills
 - Unclear seams → STATUS: NEEDS_USER_INPUT
 
 Output:
@@ -260,7 +267,11 @@ STATUS: DONE | NEEDS_USER_INPUT
 ```
 Task ID: <id>
 Type: issues
-Discipline: load skill `to-tickets` if available; else slice inline per Constraints.
+Discipline: load skill `to-tickets` if available (invoke the skill tool with "to-tickets";
+  older installs may name it "to-issues"); else slice inline per Constraints. Copilot overrides to the skill's own steps: do NOT
+  run `/setup-matt-pocock-skills`, do NOT publish issues, and do NOT "quiz the user" —
+  you are a background worker. Emit the slices + issue bodies; the frontier confirms
+  granularity with the user and the orchestrator publishes via a `gh` shell worker.
 
 Approved plan:
 <PRD or spec>
@@ -269,7 +280,7 @@ Explore summary:
 <optional>
 
 Constraints:
-- Draft tracer-bullet slices + issue bodies — do not publish
+- Draft tracer-bullet slices + issue bodies — do not publish; do not require setup-matt-pocock-skills
 - Do not quiz the user; the frontier confirms
 - Skip publish
 

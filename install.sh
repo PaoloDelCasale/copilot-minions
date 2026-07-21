@@ -19,7 +19,22 @@ mkdir -p "${SKILLS}"
 rm -rf "${DEST}"
 cp -R "${SRC}" "${DEST}"
 
+# Bundle the updater into the install dir so a scheduled workflow has a stable path.
+if [ -d "${ROOT}/scripts" ]; then
+  cp -R "${ROOT}/scripts" "${DEST}/scripts"
+fi
+
 echo "Installed copilot-minions:"
 echo "  ${DEST}"
 echo ""
+
+# Register/update the discipline skills (implement, to-spec, to-tickets) from
+# mattpocock/skills. Non-fatal: the orchestrator still runs on inline fallbacks.
+UPDATER="${ROOT}/scripts/update-disciplines.sh"
+if [ -f "${UPDATER}" ]; then
+  echo "Updating discipline skills..."
+  bash "${UPDATER}" || echo "Discipline update skipped." >&2
+  echo ""
+fi
+
 echo "Opt in with 'orchestrate', 'minions on', or 'go build it' in any project."
