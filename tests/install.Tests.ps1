@@ -46,6 +46,19 @@ exit /b 0
 
     @'
 @echo off
+if "%1"=="--list-models" (
+  echo openai-codex gpt-5.6-sol
+  echo openai-codex gpt-5.6-terra
+  echo openai-codex gpt-5.6-luna
+  echo github-copilot gpt-5.6-sol
+  echo github-copilot gpt-5.6-terra
+  echo github-copilot gpt-5.6-luna
+)
+exit /b 0
+'@ | Set-Content -LiteralPath (Join-Path $bin 'pi.cmd')
+
+    @'
+@echo off
 echo abc123
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $bin 'git.cmd')
@@ -62,8 +75,13 @@ exit /b 0
 
     $copilotSkill = Join-Path $testHome '.copilot\skills\copilot-minions'
     $codexSkill = Join-Path $testHome '.agents\skills\codex-minions'
+    $piSkill = Join-Path $testHome '.pi\agent\skills\pi-minions'
+    $piExtension = Join-Path $testHome '.pi\agent\extensions\pi-minions'
     Assert-True (Test-Path (Join-Path $copilotSkill 'frontier.md')) 'Copilot contains shared core'
     Assert-True (Test-Path (Join-Path $codexSkill 'frontier.md')) 'Codex contains shared core'
+    Assert-True (Test-Path (Join-Path $piSkill 'frontier.md')) 'Pi contains shared core'
+    Assert-True (Test-Path (Join-Path $piSkill 'platform.md')) 'Pi contains adapter'
+    Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'
     Assert-True (Test-Path (Join-Path $copilotSkill 'platform.md')) 'Copilot contains adapter'
     Assert-True (Test-Path (Join-Path $codexSkill 'platform.md')) 'Codex contains adapter'
     Assert-True (-not (Test-Path (Join-Path $codexSkill 'custom-agents'))) 'Agent sources are not copied into the skill'
@@ -76,6 +94,8 @@ exit /b 0
     foreach ($discipline in @('implement', 'to-spec', 'to-tickets')) {
         $link = Get-Item -LiteralPath (Join-Path $testHome ".agents\skills\$discipline") -Force
         Assert-True ([bool]$link.LinkType) "$discipline is linked for Codex"
+        $piLink = Get-Item -LiteralPath (Join-Path $testHome ".pi\agent\skills\$discipline") -Force
+        Assert-True ([bool]$piLink.LinkType) "$discipline is linked for Pi"
     }
 
     & (Join-Path $root 'install.ps1') -Platform all | Out-Null
@@ -91,6 +111,7 @@ exit /b 0
     $env:MINIONS_TEST_MODELS = 'complete'
     & (Join-Path $root 'install.ps1') -Platform all -Variant all | Out-Null
     Assert-True (Test-Path (Join-Path $testHome '.copilot\skills\copilot-minions-lb')) 'LB Copilot skill is installed'
+    Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb')) 'LB Pi skill is installed'
     Assert-True (@(Get-ChildItem -LiteralPath $agentDirectory -Filter 'codex-minions*.toml').Count -eq 12) 'Both Codex variants install twelve agents'
     Assert-True (Test-Path (Join-Path $agentDirectory '.codex-minions-lb-manifest')) 'LB agent manifest is installed'
 
@@ -179,6 +200,17 @@ exit /b 0
         $failed = $true
     }
     Assert-True $failed 'Unmanaged agent collision fails installation'
+
+    $piMarker = Join-Path $piExtension '.managed-by-copilot-minions'
+    Remove-Item -LiteralPath $piMarker
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform pi | Out-Null
+    } catch {
+        $failed = $true
+    }
+    Assert-True $failed 'Unmanaged Pi extension collision fails installation'
+    Set-Content -LiteralPath $piMarker -Value 'managed-by: copilot-minions'
 
     $failed = $false
     try {

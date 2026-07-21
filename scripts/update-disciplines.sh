@@ -4,13 +4,13 @@ set -euo pipefail
 PLATFORM="copilot"
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || "$1" != "--platform" ]]; then
-    echo "Usage: $0 [--platform copilot|codex|all]" >&2
+    echo "Usage: $0 [--platform copilot|codex|pi|all]" >&2
     exit 2
   fi
   PLATFORM="$2"
 fi
 case "${PLATFORM}" in
-  copilot|codex|all) ;;
+  copilot|codex|pi|all) ;;
   *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;;
 esac
 
@@ -96,6 +96,25 @@ for entry in entries:
       ln -s "${canonical}" "${target}"
     fi
     echo "  Codex: ${discipline} -> ${canonical}"
+  fi
+
+  if selected pi; then
+    skills_dir="${INSTALL_HOME}/.pi/agent/skills"
+    target="${skills_dir}/${discipline}"
+    mkdir -p "${skills_dir}"
+    if [[ -L "${target}" ]]; then
+      resolved="$(cd "${target}" && pwd -P)"
+      if [[ "${resolved}" != "${canonical}" ]]; then
+        echo "Pi discipline link points elsewhere: ${target} -> ${resolved}" >&2
+        exit 1
+      fi
+    elif [[ -e "${target}" ]]; then
+      echo "Refusing to replace unmanaged Pi discipline: ${target}" >&2
+      exit 1
+    else
+      ln -s "${canonical}" "${target}"
+    fi
+    echo "  Pi: ${discipline} -> ${canonical}"
   fi
 done
 

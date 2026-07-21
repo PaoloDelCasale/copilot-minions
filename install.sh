@@ -16,12 +16,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 [--platform copilot|codex|all] [--variant standard|lb|all]" >&2
+      echo "Usage: $0 [--platform copilot|codex|pi|all] [--variant standard|lb|all]" >&2
       exit 2
       ;;
   esac
 done
-case "${PLATFORM}" in copilot|codex|all) ;; *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;; esac
+case "${PLATFORM}" in copilot|codex|pi|all) ;; *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;; esac
 case "${VARIANT}" in standard|lb|all) ;; *) echo "Unknown variant: ${VARIANT}" >&2; exit 2 ;; esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +45,13 @@ COMMIT_STARTED=0
 selected_platform() { [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]; }
 selected_variant() { [[ "${VARIANT}" == "$1" || "${VARIANT}" == "all" ]]; }
 require_directory() { [[ -d "$1" ]] || { echo "Source directory not found: $1" >&2; exit 1; }; }
+
+assert_pi_available() {
+  command -v pi >/dev/null 2>&1 || {
+    echo "pi not found on PATH; Pi installation requires the Pi coding agent." >&2
+    exit 1
+  }
+}
 
 assert_codex_models() {
   command -v codex >/dev/null 2>&1 || {
@@ -78,8 +85,16 @@ assert_managed_file() {
   fi
 }
 
+assert_managed_pi_directory() {
+  local path="$1"
+  if [[ -e "${path}" && ! -f "${path}/.managed-by-copilot-minions" ]]; then
+    echo "Refusing to overwrite unmanaged Pi resource: ${path}" >&2
+    exit 1
+  fi
+}
+
 new_skill_stage() {
-  local name="$1" overlay="$2" profile="$3" destination="$4"
+  local name="$1" overlay="$2" profile="$3" destination="$4" managed="${5:-false}"
   require_directory "${overlay}"
   local parent stage
   parent="$(dirname "${destination}")"
@@ -93,6 +108,24 @@ new_skill_stage() {
   fi
   cp "${overlay}/SKILL.md" "${overlay}/platform.md" "${stage}/"
   [[ -d "${ROOT}/scripts" ]] && cp -R "${ROOT}/scripts" "${stage}/scripts"
+  [[ "${managed}" == "true" ]] && printf '%s\n' 'managed-by: copilot-minions' > "${stage}/.managed-by-copilot-minions"
+  STAGE_PATHS+=("${stage}")
+  SKILL_STAGES+=("${stage}")
+  SKILL_DESTS+=("${destination}")
+  SKILL_BACKUPS+=("")
+}
+
+new_pi_extension_stage() {
+  local source="${ROOT}/extensions/pi-minions"
+  local destination="${INSTALL_HOME}/.pi/agent/extensions/pi-minions"
+  require_directory "${source}"
+  assert_managed_pi_directory "${destination}"
+  local parent stage
+  parent="$(dirname "${destination}")"
+  mkdir -p "${parent}"
+  stage="${parent}/.pi-minions.stage.${TRANSACTION_ID}"
+  mkdir -p "${stage}"
+  cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
@@ -158,6 +191,13 @@ add_variant_stages() {
     new_agent_stage "${name}" "${overlay}"
     new_skill_stage "${name}" "${overlay}" "${profile}" "${INSTALL_HOME}/.agents/skills/${name}"
   fi
+  if selected_platform pi; then
+    name="pi-minions${suffix}"
+    overlay="${ROOT}/skills/${name}"
+    destination="${INSTALL_HOME}/.pi/agent/skills/${name}"
+    assert_managed_pi_directory "${destination}"
+    new_skill_stage "${name}" "${overlay}" "${profile}" "${destination}" true
+  fi
 }
 
 rollback() {
@@ -207,6 +247,8 @@ trap cleanup EXIT
 
 require_directory "${CORE}"
 selected_platform codex && assert_codex_models
+selected_platform pi && assert_pi_available
+selected_platform pi && new_pi_extension_stage
 selected_variant standard && add_variant_stages standard
 selected_variant lb && add_variant_stages lb
 

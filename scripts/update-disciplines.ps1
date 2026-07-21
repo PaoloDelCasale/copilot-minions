@@ -1,6 +1,6 @@
 #Requires -Version 5.0
 param(
-    [ValidateSet('copilot', 'codex', 'all')]
+    [ValidateSet('copilot', 'codex', 'pi', 'all')]
     [string]$Platform = 'copilot',
     [string]$CacheDir,
     [string]$Ref = 'main'
@@ -110,6 +110,31 @@ foreach ($discipline in $disciplines) {
             New-Item -ItemType $linkType -Path $target -Target $canonical | Out-Null
         }
         Write-Host "  Codex: $discipline -> $canonical"
+    }
+
+    if (Test-Selected 'pi') {
+        $skillsDirectory = Join-Path $installHome '.pi\agent\skills'
+        $target = Join-Path $skillsDirectory $discipline
+        New-Item -ItemType Directory -Force -Path $skillsDirectory | Out-Null
+
+        if (Test-Path -LiteralPath $target) {
+            $item = Get-Item -LiteralPath $target -Force
+            if (-not $item.LinkType) {
+                throw "Refusing to replace unmanaged Pi discipline: $target"
+            }
+            $linkTarget = @($item.Target)[0]
+            if (-not [System.IO.Path]::IsPathRooted($linkTarget)) {
+                $linkTarget = Join-Path (Split-Path -Parent $target) $linkTarget
+            }
+            $resolved = (Resolve-Path -LiteralPath $linkTarget).Path
+            if ($resolved -ne $canonical) {
+                throw "Pi discipline link points elsewhere: $target -> $resolved"
+            }
+        } else {
+            $linkType = if ($PSVersionTable.Platform -eq 'Unix') { 'SymbolicLink' } else { 'Junction' }
+            New-Item -ItemType $linkType -Path $target -Target $canonical | Out-Null
+        }
+        Write-Host "  Pi: $discipline -> $canonical"
     }
 }
 

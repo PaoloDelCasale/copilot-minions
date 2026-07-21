@@ -1,6 +1,6 @@
 #Requires -Version 5.0
 param(
-    [ValidateSet('copilot', 'codex', 'all')]
+    [ValidateSet('copilot', 'codex', 'pi', 'all')]
     [string]$Platform = 'copilot',
     [ValidateSet('standard', 'lb', 'all')]
     [string]$Variant = 'standard'
@@ -34,6 +34,12 @@ function Test-Variant([string]$name) {
 function Assert-Directory([string]$path) {
     if (-not (Test-Path -LiteralPath $path -PathType Container)) {
         throw "Source directory not found: $path"
+    }
+}
+
+function Assert-PiAvailable {
+    if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
+        throw 'pi not found on PATH; Pi installation requires the Pi coding agent.'
     }
 }
 
@@ -87,11 +93,19 @@ function Assert-ManagedFile([string]$path) {
     }
 }
 
+function Assert-ManagedPiDirectory([string]$path) {
+    if ((Test-Path -LiteralPath $path) -and
+        -not (Test-Path -LiteralPath (Join-Path $path '.managed-by-copilot-minions') -PathType Leaf)) {
+        throw "Refusing to overwrite unmanaged Pi resource: $path"
+    }
+}
+
 function New-SkillStage(
     [string]$name,
     [string]$overlay,
     [string]$profile,
-    [string]$destination
+    [string]$destination,
+    [bool]$managed = $false
 ) {
     Assert-Directory $overlay
     $parent = Split-Path -Parent $destination
@@ -109,9 +123,30 @@ function New-SkillStage(
     if (Test-Path -LiteralPath (Join-Path $root 'scripts')) {
         Copy-Item -Recurse -Force (Join-Path $root 'scripts') (Join-Path $stage 'scripts')
     }
+    if ($managed) {
+        Set-Content -LiteralPath (Join-Path $stage '.managed-by-copilot-minions') -Value 'managed-by: copilot-minions'
+    }
 
     $script:stagedSkills += [pscustomobject]@{
         Name = $name
+        Stage = $stage
+        Destination = $destination
+    }
+}
+
+function New-PiExtensionStage {
+    $source = Join-Path $root 'extensions\pi-minions'
+    $destination = Join-Path $installHome '.pi\agent\extensions\pi-minions'
+    Assert-Directory $source
+    Assert-ManagedPiDirectory $destination
+    $parent = Split-Path -Parent $destination
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    $stage = Join-Path $parent ".pi-minions.stage.$transactionId"
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
+    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
+    $script:stagedSkills += [pscustomobject]@{
+        Name = 'pi-minions-extension'
         Stage = $stage
         Destination = $destination
     }
@@ -164,6 +199,13 @@ function Add-VariantStages([string]$variantName) {
         $overlay = Join-Path $root "skills\$name"
         New-AgentStage $name $overlay
         New-SkillStage $name $overlay $profile (Join-Path $installHome ".agents\skills\$name")
+    }
+    if (Test-Platform 'pi') {
+        $name = "pi-minions$suffix"
+        $overlay = Join-Path $root "skills\$name"
+        $destination = Join-Path $installHome ".pi\agent\skills\$name"
+        Assert-ManagedPiDirectory $destination
+        New-SkillStage $name $overlay $profile $destination $true
     }
 }
 
@@ -235,6 +277,10 @@ Assert-Directory $core
 try {
     if (Test-Platform 'codex') {
         Assert-CodexModels
+    }
+    if (Test-Platform 'pi') {
+        Assert-PiAvailable
+        New-PiExtensionStage
     }
     if (Test-Variant 'standard') {
         Add-VariantStages 'standard'
