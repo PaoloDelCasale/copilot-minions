@@ -1,0 +1,33 @@
+# Model routing
+
+Use this exact model matrix on every supported platform. Record model and reasoning
+effort in board Notes. A user-requested model overrides the matrix for that batch.
+
+| Role | Work | Model | Reasoning |
+|------|------|-------|-----------|
+| Frontier | Dispatch and triage | `gpt-5.6-sol` | medium |
+| `mechanical` | Shell, git, commit, worktree, bulk wiring | `gpt-5.6-luna` | low |
+| `explorer` | Read-only repository facts | `gpt-5.6-luna` | high |
+| `implementer` | Default feature or bug fix | `gpt-5.6-luna` | xhigh |
+| `architect` | Architecture, auth, payments, migrations, tricky logic | `gpt-5.6-sol` | medium |
+| `reviewer` | Independent review | `gpt-5.6-sol` | low |
+| `planner` | PRD and issue synthesis | `gpt-5.6-terra` | high |
+| `mechanical` | Merge conflict or GitHub judgment | `gpt-5.6-terra` | medium |
+
+Every spawn pins both model and effort. The platform adapter maps the semantic role to
+its native agent type or custom agent.
+
+## Escalation
+
+On mediocre output, verify failure, or `BLOCKED`, respawn fresh:
+
+```text
+gpt-5.6-luna xhigh
+  -> gpt-5.6-terra medium
+  -> gpt-5.6-sol medium
+  -> gpt-5.6-sol high/max
+  -> split or ask the user
+```
+
+Start at `architect` for work that is clearly complex. Never escalate the frontier
+automatically.

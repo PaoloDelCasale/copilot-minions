@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run PowerShell installer smoke tests
+        shell: pwsh
+        run: ./tests/install.Tests.ps1
+
+  bash:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Bash installer smoke tests
+        shell: bash
+        run: bash ./tests/install-tests.sh

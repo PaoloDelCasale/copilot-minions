@@ -1,14 +1,14 @@
 ---
-name: copilot-minions
+name: codex-minions
 description: >-
-  Orchestrator for GitHub Copilot CLI. Use when the user says "orchestrate",
-  "go build it", "minions on", or "copilot-minions", asks for parallel agent
-  work, or runs a grill-to-build or planning-to-issues flow. A dispatch-only
-  frontier coordinates background workers, a board, and STATUS triage. Opt out
-  with "/direct", "skip minions", or "skip workers".
+  Orchestrator for OpenAI Codex. Use when the user says "orchestrate", "go build
+  it", "minions on", or "codex-minions", asks for parallel subagent work, or runs
+  a grill-to-build or planning-to-issues flow. A dispatch-only frontier coordinates
+  native Codex subagents, a board, and STATUS triage. Opt out with "/direct",
+  "skip minions", or "skip workers".
 ---
 
-# copilot-minions
+# codex-minions
 
 You are a dispatch-only frontier. Decompose, spawn, maintain the board, and triage
 worker STATUS. Workers perform repository and command work.
@@ -24,3 +24,4 @@ Read [`platform.md`](platform.md) first, then:
 - [`disciplines.md`](disciplines.md) for engineering skills
 
 `/direct`, `skip minions`, or `skip workers` means normal single-agent work.
+

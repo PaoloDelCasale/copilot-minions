@@ -1,119 +1,175 @@
 # copilot-minions
 
-GitHub Copilot CLI skill: a **dispatch-only frontier** orchestrates background
-**workers** through an async **inbox**. Workers are Copilot `task` sub-agents with
-pinned models.
+Dual-platform orchestration skill for **GitHub Copilot CLI** and **OpenAI Codex**.
+A dispatch-only frontier coordinates bounded workers through a shared board and
+STATUS protocol. Workers implement, explore, review, plan, and run commands in
+isolated worktrees.
 
-Port of [minion-orchestrator](https://github.com/lenniii/minion-orchestrator) (a
-Cursor skill) to GitHub Copilot CLI. Cursor `Task` spawns → Copilot `task`
-sub-agents; Cursor-only models → Copilot models.
+The methodology is shared; only platform capabilities differ:
 
-Inspired by the [async agent fleet pattern](https://x.com/thdxr/status/2072464584171004005).
+- Copilot spawns background `task` agents and reads completion notifications.
+- Codex spawns native subagents, uses managed custom agents, and exposes threads
+  through `/agent`.
+
+Codex support is **beta** until the shared Sol/Terra/Luna model stack is confirmed
+against an authenticated Codex catalog.
 
 ## Install
 
-Windows (PowerShell):
+The existing no-argument commands remain Copilot-compatible:
 
 ```powershell
 ./install.ps1
 ```
 
-Linux / macOS:
-
 ```bash
 ./install.sh
 ```
 
-Copies `skills/copilot-minions/` into `~/.copilot/skills/copilot-minions`. Re-run
-after `git pull`. Restart / reload your Copilot session afterwards so the skill
-appears in the `/` menu.
+Select a platform explicitly:
+
+```powershell
+./install.ps1 -Platform copilot
+./install.ps1 -Platform codex
+./install.ps1 -Platform all
+```
+
+```bash
+./install.sh --platform copilot
+./install.sh --platform codex
+./install.sh --platform all
+```
+
+Install the additional low-budget variants:
+
+```powershell
+./install.ps1 -Platform all -Variant lb
+./install.ps1 -Platform all -Variant all
+```
+
+```bash
+./install.sh --platform all --variant lb
+./install.sh --platform all --variant all
+```
+
+`Variant` defaults to `standard`. `all` installs standard and low-budget skills
+side-by-side.
+
+Destinations:
+
+| Platform | Skill | Companion agents |
+|----------|-------|------------------|
+| Copilot | `~/.copilot/skills/copilot-minions` | Native Copilot agent types |
+| Copilot LB | `~/.copilot/skills/copilot-minions-lb` | Native Copilot agent types |
+| Codex | `~/.agents/skills/codex-minions` | `~/.codex/agents/codex-minions-*.toml` |
+| Codex LB | `~/.agents/skills/codex-minions-lb` | `~/.codex/agents/codex-minions-lb-*.toml` |
+
+Codex installation requires `codex` on `PATH` and runs `codex debug models` before
+writing files. Installation fails if `gpt-5.6-sol`, `gpt-5.6-terra`, or
+`gpt-5.6-luna` is unavailable. `all` preflights and stages both platforms before
+replacing either installation.
+
+The six Codex agent files are namespaced and carry a managed marker. The installer
+updates only managed files and refuses to overwrite a user-owned collision.
 
 ## Usage
 
-**Opt in:** "orchestrate", "go build it", "minions on", "copilot-minions",
-grill→build, planning→issues.
+Standard triggers: `orchestrate`, `go build it`, `minions on`, and planning-to-build
+flows. Platform names are explicit: `copilot-minions` and `codex-minions`.
+Low-budget variants trigger on `orchestrate low budget`, `minions lb`, or their
+explicit names.
 
-**Opt out:** "/direct", "skip minions", "skip workers".
+Opt out with `/direct`, `skip minions`, or `skip workers`.
 
 ## Model stack
 
-**All-GPT-5.6 single family** (Sol / Terra / Luna) — usage-based AI credits.
+Both platforms use the same routing:
 
-| Role | Model | Reasoning | `task` agent_type |
-|------|-------|-----------|-------------------|
-| Frontier (session) | `gpt-5.6-sol` | medium | — |
-| Mechanical / commit / shell / worktree | `gpt-5.6-luna` | low | `task` |
-| Explore | `gpt-5.6-luna` | high | `explore` |
-| Default implement (feature + tests) | `gpt-5.6-luna` | xhigh | `general-purpose` |
-| Complex up-front (arch, auth, migrations) | `gpt-5.6-sol` | medium | `general-purpose` |
-| Review | `gpt-5.6-sol` | low | `code-review` |
-| PRD / issues | `gpt-5.6-terra` | high | `general-purpose` |
+| Role | Model | Reasoning |
+|------|-------|-----------|
+| Frontier | `gpt-5.6-sol` | medium |
+| Mechanical | `gpt-5.6-luna` | low |
+| Explorer | `gpt-5.6-luna` | high |
+| Implementer | `gpt-5.6-luna` | xhigh |
+| Architect | `gpt-5.6-sol` | medium |
+| Reviewer | `gpt-5.6-sol` | low |
+| Planner | `gpt-5.6-terra` | high |
 
-Escalation: `gpt-5.6-luna` xhigh → `gpt-5.6-terra` medium → `gpt-5.6-sol` medium →
-`gpt-5.6-sol` high/max → split/ask. Details: `skills/copilot-minions/models.md`.
-Rationale (incl. why Sonnet/Opus/Kimi were dropped):
-`skills/copilot-minions/model-rationale.md`.
+See `skills/core/models.md` and `skills/core/model-rationale.md`.
 
-## Skill layout
+### Low-budget stack
 
-| File | Purpose |
-|------|---------|
-| `SKILL.md` | Steps + branch detection |
-| `frontier.md` | Frontier dispatch rules, planning |
-| `loop.md` | Implement cycle, repo discovery |
-| `prompts.md` | Worker spawn templates |
-| `disciplines.md` | Discipline-skill wiring + fallbacks |
-| `models.md` | Routing + escalation |
-| `model-rationale.md` | Why each Copilot model was chosen |
-| `state.md` | Board format |
-| `shell.md` | CLI delegation |
-| `worktrees.md` | Parallel worktrees |
+Inspired by the model routing in
+[`nsEytgXm/subagents_configs`](https://github.com/nsEytgXm/subagents_configs), while
+preserving the existing minions flow:
 
-## Flow
+| Role | Model | Reasoning |
+|------|-------|-----------|
+| Frontier | `gpt-5.6-sol` | medium |
+| Mechanical | `gpt-5.6-luna` | low |
+| Explorer | `gpt-5.6-luna` | medium |
+| Implementer / architect / planner | `gpt-5.6-luna` | high |
+| Reviewer | `gpt-5.6-sol` | low |
 
+Unlike the source configuration, LB does not add a separate validator or make review
+selective. Verify and mandatory review gates remain unchanged.
+
+## Source layout
+
+```text
+skills/
+  core/                    shared workflow, prompts, board, models, worktrees
+  lb/                      low-budget model overlay
+  copilot-minions/         Copilot entrypoint and capability adapter
+  copilot-minions-lb/      Copilot low-budget entrypoint and adapter
+  codex-minions/           Codex entrypoint, adapter, and custom-agent sources
+  codex-minions-lb/        Codex low-budget entrypoint, adapter, and agents
 ```
-decompose → spawn (background) → implement → review → fix → … → commit
-```
 
-Planning: grill → PRD/issues workers → publish → orchestrate.
+Installers create autosufficient skill directories by copying the core and selected
+overlay. They do not generate or template Markdown.
 
-## Discipline layer
+## Discipline skills
 
-copilot-minions only **dispatches**. How workers implement, test, review, and spec
-comes from **discipline skills** — mostly from
-[`mattpocock/skills`](https://github.com/mattpocock/skills): `grilling`, `tdd`,
-`code-review`, `implement`, `to-spec`, `to-tickets`, plus `codebase-design` /
-`domain-modeling` / `diagnosing-bugs`. Each worker loads its discipline if
-installed, else falls back to inline constraints. copilot-minions **references**
-these skills (never forks them) and can keep them updated from upstream — see
-[Keeping disciplines updated](#keeping-disciplines-updated) and
-`skills/copilot-minions/disciplines.md`.
+The frontier dispatches; discipline skills define how workers engineer:
+`grilling`, `implement`, `tdd`, `code-review`, `to-spec`, `to-tickets`,
+`codebase-design`, `domain-modeling`, and `diagnosing-bugs`.
 
-## Keeping disciplines updated
-
-Three disciplines aren't in Copilot's default set — `implement`, `to-spec`,
-`to-tickets` (Matt renamed the last two from `to-prd` / `to-issues`). The bundled
-updater clones/pulls `mattpocock/skills` `main` into a portable cache and registers
-them as **custom skills** (directory references), so a plain `git pull` refreshes
-their content:
+The platform-aware updater tracks `mattpocock/skills` for `implement`, `to-spec`, and
+`to-tickets`:
 
 ```powershell
-scripts/update-disciplines.ps1        # Windows / PowerShell
+scripts/update-disciplines.ps1 -Platform all
 ```
+
 ```bash
-scripts/update-disciplines.sh         # macOS / Linux
+scripts/update-disciplines.sh --platform all
 ```
 
-`install.ps1` / `install.sh` call this automatically (non-fatal if offline).
+Copilot registers cache directories with `copilot skill add`. Codex uses managed
+links under `~/.agents/skills`. External discipline updates are non-fatal because
+worker prompts include complete inline fallbacks.
 
-**Weekly auto-update (Copilot workflow).** Create a scheduled workflow that runs the
-updater once a week — e.g. a weekly workflow with the prompt:
+## Tests
 
-> Run `scripts/update-disciplines.ps1` (or `scripts/update-disciplines.sh`) from the
-> copilot-minions repo to refresh the discipline skills, then report what changed.
+Smoke tests use temporary homes and mocked CLI catalogs; no account is required:
 
-Because registrations are directory references, the workflow only needs to pull and
-re-run the script; no re-install of copilot-minions itself is required.
+```powershell
+./tests/install.Tests.ps1
+```
+
+```bash
+bash ./tests/install-tests.sh
+```
+
+GitHub Actions runs the PowerShell suite on Windows and the Bash suite on Ubuntu and
+macOS.
+
+## Release
+
+The dual-platform change lands as one backward-compatible PR. The first `v0.1.0`
+release is gated on a manual authenticated Codex run confirming the required model
+IDs and a real native-subagent orchestration cycle.
 
 ## License
 

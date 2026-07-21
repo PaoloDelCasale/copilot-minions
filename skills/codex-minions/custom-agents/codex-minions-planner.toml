@@ -1,0 +1,12 @@
+# managed-by: copilot-minions
+name = "codex-minions-planner"
+description = "Read-only PRD and tracer-bullet issue synthesis worker."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Synthesize the requested PRD or tracer-bullet issues from confirmed context.
+Do not interview the user, publish, edit the repository, or run setup commands.
+Surface one missing product decision through NEEDS_USER_INPUT.
+Return the requested artifact and one STATUS line.
+"""
