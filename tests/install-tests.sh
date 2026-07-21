@@ -35,6 +35,19 @@ if [[ "${1:-}" == "skill" && "${2:-}" == "list" ]]; then
 fi
 EOF
 
+cat > "${TEMP}/bin/pi" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--list-models" ]]; then
+  printf '%s\n' \
+    'openai-codex gpt-5.6-sol' \
+    'openai-codex gpt-5.6-terra' \
+    'openai-codex gpt-5.6-luna' \
+    'github-copilot gpt-5.6-sol' \
+    'github-copilot gpt-5.6-terra' \
+    'github-copilot gpt-5.6-luna'
+fi
+EOF
+
 cat > "${TEMP}/bin/git" <<'EOF'
 #!/usr/bin/env bash
 echo abc123
@@ -51,7 +64,7 @@ if [[ -n "${MINIONS_TEST_FAIL_MOVE_TARGET:-}" &&
 fi
 exec /bin/mv "$@"
 EOF
-chmod +x "${TEMP}/bin/codex" "${TEMP}/bin/copilot" "${TEMP}/bin/git" "${TEMP}/bin/mv"
+chmod +x "${TEMP}/bin/codex" "${TEMP}/bin/copilot" "${TEMP}/bin/pi" "${TEMP}/bin/git" "${TEMP}/bin/mv"
 
 count_files() {
   local count=0 file
@@ -66,10 +79,15 @@ bash "${ROOT}/install.sh" --platform all >/dev/null
 
 COPILOT_SKILL="${MINIONS_HOME}/.copilot/skills/copilot-minions"
 CODEX_SKILL="${MINIONS_HOME}/.agents/skills/codex-minions"
+PI_SKILL="${MINIONS_HOME}/.pi/agent/skills/pi-minions"
+PI_EXTENSION="${MINIONS_HOME}/.pi/agent/extensions/pi-minions"
 AGENTS="${MINIONS_HOME}/.codex/agents"
 
 [[ -f "${COPILOT_SKILL}/frontier.md" ]]
 [[ -f "${CODEX_SKILL}/frontier.md" ]]
+[[ -f "${PI_SKILL}/frontier.md" ]]
+[[ -f "${PI_SKILL}/platform.md" ]]
+[[ -f "${PI_EXTENSION}/index.ts" ]]
 [[ -f "${COPILOT_SKILL}/platform.md" ]]
 [[ -f "${CODEX_SKILL}/platform.md" ]]
 [[ ! -e "${CODEX_SKILL}/custom-agents" ]]
@@ -77,6 +95,7 @@ AGENTS="${MINIONS_HOME}/.codex/agents"
 [[ -f "${AGENTS}/.codex-minions-manifest" ]]
 for discipline in implement to-spec to-tickets; do
   [[ -L "${MINIONS_HOME}/.agents/skills/${discipline}" ]]
+  [[ -L "${MINIONS_HOME}/.pi/agent/skills/${discipline}" ]]
 done
 
 bash "${ROOT}/install.sh" --platform all >/dev/null
@@ -91,6 +110,7 @@ grep -Eq 'explorer.*gpt-5.6-luna.*medium' "${CODEX_LB_SKILL}/models.md"
 export MINIONS_TEST_MODELS=complete
 bash "${ROOT}/install.sh" --platform all --variant all >/dev/null
 [[ -f "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/SKILL.md" ]]
+[[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/SKILL.md" ]]
 [[ "$(count_files "${AGENTS}"/codex-minions*.toml)" -eq 12 ]]
 [[ -f "${AGENTS}/.codex-minions-lb-manifest" ]]
 
@@ -121,6 +141,13 @@ if bash "${ROOT}/install.sh" --platform codex >/dev/null 2>&1; then
   echo 'Expected unmanaged agent collision to fail.' >&2
   exit 1
 fi
+
+rm "${PI_EXTENSION}/.managed-by-copilot-minions"
+if bash "${ROOT}/install.sh" --platform pi >/dev/null 2>&1; then
+  echo 'Expected unmanaged Pi extension collision to fail.' >&2
+  exit 1
+fi
+printf '%s\n' 'managed-by: copilot-minions' > "${PI_EXTENSION}/.managed-by-copilot-minions"
 
 if bash "${ROOT}/install.sh" --platform invalid >/dev/null 2>&1; then
   echo 'Expected invalid platform to fail.' >&2

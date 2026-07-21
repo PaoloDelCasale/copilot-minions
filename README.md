@@ -1,18 +1,19 @@
 # copilot-minions
 
-Dual-platform orchestration skill for **GitHub Copilot CLI** and **OpenAI Codex**.
-A dispatch-only frontier coordinates bounded workers through a shared board and
-STATUS protocol. Workers implement, explore, review, plan, and run commands in
-isolated worktrees.
+Multi-platform orchestration skills for **GitHub Copilot CLI**, **OpenAI Codex**,
+and **Pi**. A dispatch-only frontier coordinates bounded workers through a shared
+board and STATUS protocol. Workers implement, explore, review, plan, and run commands
+in isolated worktrees.
 
 The methodology is shared; only platform capabilities differ:
 
 - Copilot spawns background `task` agents and reads completion notifications.
 - Codex spawns native subagents, uses managed custom agents, and exposes threads
   through `/agent`.
+- Pi runs managed background `pi --mode rpc` subprocesses with the provider selected
+  by the parent session.
 
-Codex support is **beta** until the shared Sol/Terra/Luna model stack is confirmed
-against an authenticated Codex catalog.
+Codex and Pi support are **beta** until their authenticated release gates pass.
 
 ## Install
 
@@ -31,12 +32,14 @@ Select a platform explicitly:
 ```powershell
 ./install.ps1 -Platform copilot
 ./install.ps1 -Platform codex
+./install.ps1 -Platform pi
 ./install.ps1 -Platform all
 ```
 
 ```bash
 ./install.sh --platform copilot
 ./install.sh --platform codex
+./install.sh --platform pi
 ./install.sh --platform all
 ```
 
@@ -63,19 +66,25 @@ Destinations:
 | Copilot LB | `~/.copilot/skills/copilot-minions-lb` | Native Copilot agent types |
 | Codex | `~/.agents/skills/codex-minions` | `~/.codex/agents/codex-minions-*.toml` |
 | Codex LB | `~/.agents/skills/codex-minions-lb` | `~/.codex/agents/codex-minions-lb-*.toml` |
+| Pi | `~/.pi/agent/skills/pi-minions` | Shared extension in `~/.pi/agent/extensions/pi-minions` |
+| Pi LB | `~/.pi/agent/skills/pi-minions-lb` | Shared extension in `~/.pi/agent/extensions/pi-minions` |
 
 Codex installation requires `codex` on `PATH` and runs `codex debug models` before
 writing files. Installation fails if `gpt-5.6-sol`, `gpt-5.6-terra`, or
-`gpt-5.6-luna` is unavailable. `all` preflights and stages both platforms before
-replacing either installation.
+`gpt-5.6-luna` is unavailable. Pi installation requires `pi` on `PATH`; its provider
+catalog is validated at orchestration start because availability depends on the
+active authenticated provider. `all` preflights and stages every platform before
+replacing any installation.
 
-The six Codex agent files are namespaced and carry a managed marker. The installer
-updates only managed files and refuses to overwrite a user-owned collision.
+The six Codex agent files are namespaced and carry a managed marker. Pi skills and
+the shared extension also carry managed markers. The installer updates only managed
+Pi/Codex resources and refuses to overwrite a user-owned collision.
 
 ## Usage
 
 Standard triggers: `orchestrate`, `go build it`, `minions on`, and planning-to-build
-flows. Platform names are explicit: `copilot-minions` and `codex-minions`.
+flows. Platform names are explicit: `copilot-minions`, `codex-minions`, and
+`pi-minions`.
 Low-budget variants trigger on `orchestrate low budget`, `minions lb`, or their
 explicit names.
 
@@ -96,6 +105,15 @@ Both platforms use the same routing:
 | Planner | `gpt-5.6-terra` | high |
 
 See `skills/core/models.md` and `skills/core/model-rationale.md`.
+
+### Pi provider affinity
+
+Starting either Pi skill captures the parent provider. Only `openai-codex` and
+`github-copilot` are accepted. The frontier switches to
+`<provider>/gpt-5.6-sol:medium`; workers keep the existing role routing while every
+model is qualified with that same provider. Missing required models fail preflight;
+there is no cross-provider or availability fallback. Closing the run restores the
+parent's original model and thinking level.
 
 ### Low-budget stack
 
@@ -124,6 +142,10 @@ skills/
   copilot-minions-lb/      Copilot low-budget entrypoint and adapter
   codex-minions/           Codex entrypoint, adapter, and custom-agent sources
   codex-minions-lb/        Codex low-budget entrypoint, adapter, and agents
+  pi-minions/              Pi entrypoint and RPC adapter
+  pi-minions-lb/           Pi low-budget entrypoint and RPC adapter
+extensions/
+  pi-minions/              Shared provider-affine RPC worker runtime
 ```
 
 Installers create autosufficient skill directories by copying the core and selected
@@ -147,7 +169,8 @@ scripts/update-disciplines.sh --platform all
 ```
 
 Copilot registers cache directories with `copilot skill add`. Codex uses managed
-links under `~/.agents/skills`. External discipline updates are non-fatal because
+links under `~/.agents/skills`; Pi uses managed links under `~/.pi/agent/skills`.
+External discipline updates are non-fatal because
 worker prompts include complete inline fallbacks.
 
 ## Tests
@@ -169,7 +192,8 @@ macOS.
 
 The dual-platform change lands as one backward-compatible PR. The first `v0.1.0`
 release is gated on a manual authenticated Codex run confirming the required model
-IDs and a real native-subagent orchestration cycle.
+IDs and a real native-subagent orchestration cycle. Pi remains beta until real RPC
+orchestration runs pass with both `openai-codex` and `github-copilot`.
 
 ## License
 

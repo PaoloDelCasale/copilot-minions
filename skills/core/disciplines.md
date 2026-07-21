@@ -21,5 +21,5 @@ is overridden: the worker returns a STATUS, and the frontier owns those actions.
 
 The platform-aware updater keeps `implement`, `to-spec`, and `to-tickets` current from
 `mattpocock/skills`. Copilot registers the cache through its CLI. Codex links the cache
-under `~/.agents/skills`.
+under `~/.agents/skills`; Pi links it under `~/.pi/agent/skills`.
 
