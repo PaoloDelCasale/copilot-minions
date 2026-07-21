@@ -8,6 +8,11 @@ Every spawn: `mode: "background"`. Pass each block as the `task` `prompt`; set
 > `mode: "background"`; `Shell working_directory` → `powershell` command run with
 > the worktree cwd (or `git -C <abs>`).
 
+**Disciplines.** Worker *behaviour* comes from discipline skills
+([`disciplines.md`](disciplines.md)). Where a template has a `Discipline:` line,
+the worker loads that skill if available (invoke the `skill` tool with the name),
+otherwise follows the inline `Constraints` as fallback.
+
 ## explore
 
 Delegated repo facts. `agent_type: explore`, model `kimi-k2.7-code`.
@@ -42,6 +47,8 @@ STATUS: DONE | BLOCKED
 ```
 Task ID: <id>
 Type: implement
+Discipline: load skill `implement` if available; else follow Constraints below.
+  Design seams → lean on `codebase-design` / `domain-modeling` if present.
 
 Spec:
 <issue or excerpt — <=15 lines>
@@ -76,6 +83,8 @@ STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED
 ```
 Task ID: <id>
 Type: review
+Discipline: Copilot `code-review` agent type (built-in). Also load skill
+  `code-review` if installed.
 
 Fixed point: <SHA>
 Spec: <acceptance criteria for this task only>
@@ -113,6 +122,8 @@ Changes:
 ```
 Task ID: <id>
 Type: fix-review
+Discipline: load skill `tdd` if available (red-green-refactor); else follow
+  Constraints below.
 
 Changes:
 <verbatim from reviewer>
@@ -123,6 +134,8 @@ Working directory (absolute):
 Constraints:
 - Scoped: every shell/git call uses cwd = path above (worktrees.md Scoped cwd)
 - Edit only reviewer files (+ direct fixes)
+- Fallback (no `tdd` skill): reproduce the issue with a failing test first, then fix
+  until green; do not delete tests to pass
 - Verify gate: re-run lint / test / typecheck before DONE
 - Do not commit — the post-review commit handles it
 
@@ -219,6 +232,7 @@ STATUS: DONE | BLOCKED
 ```
 Task ID: <id>
 Type: prd
+Discipline: load skill `to-spec` if available; else synthesize inline per Constraints.
 
 Context:
 <grilling decisions, constraints — structured brief, not chat dump>
@@ -246,6 +260,7 @@ STATUS: DONE | NEEDS_USER_INPUT
 ```
 Task ID: <id>
 Type: issues
+Discipline: load skill `to-tickets` if available; else slice inline per Constraints.
 
 Approved plan:
 <PRD or spec>

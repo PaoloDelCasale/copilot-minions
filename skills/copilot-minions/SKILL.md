@@ -22,6 +22,11 @@ sub-agents; Cursor-only models → Copilot models ([`models.md`](models.md)).
 **Tight** frontier turns — STATUS + one line per triage; spawn specs ≤15 lines;
 issue/spec by reference. Frontier rules: [`frontier.md`](frontier.md).
 
+**Disciplines.** The frontier only dispatches; *how* workers implement, test,
+review, and spec comes from **discipline skills** (grilling, tdd, code-review,
+implement, to-spec, to-tickets) — [`disciplines.md`](disciplines.md). Each worker
+loads its discipline if installed, else uses an inline fallback.
+
 ## Branch
 
 | Mode | Trigger | Load |
@@ -32,7 +37,7 @@ issue/spec by reference. Frontier rules: [`frontier.md`](frontier.md).
 
 `/direct` | `skip minions` | `skip workers` → normal agent, no spawns.
 
-Models: [`models.md`](models.md). Prompts: [`prompts.md`](prompts.md). Shell: [`shell.md`](shell.md).
+Models: [`models.md`](models.md). Prompts: [`prompts.md`](prompts.md). Shell: [`shell.md`](shell.md). Disciplines: [`disciplines.md`](disciplines.md).
 
 ## Inbox
 

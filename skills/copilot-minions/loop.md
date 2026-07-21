@@ -3,7 +3,10 @@
 **Branch:** orchestration
 
 Per **implement** task: `task` with `agent_type: general-purpose`, pinned `model`,
-`mode: "background"`.
+`mode: "background"`. Worker discipline comes from skills
+([`disciplines.md`](disciplines.md)): implement→`implement`, fix-review→`tdd`,
+review→`code-review` agent, prd→`to-spec`, issues→`to-tickets` — each with an
+inline fallback if not installed.
 
 Record `fixed:` (`git rev-parse HEAD` in the **worktree**) in board Notes before
 the first implement spawn.

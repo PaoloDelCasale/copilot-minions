@@ -14,7 +14,7 @@ turns: board, spawn specs, STATUS triage, short user Q&A.
 
 | Work | Behaviour |
 |------|-----------|
-| **Grilling** | One question at a time (via `ask_user`); workers cannot see the thread |
+| **Grilling** | One question at a time (via `ask_user`, skill `grilling`); workers cannot see the thread |
 | **User Q&A** | Confirm seams, slice granularity, approve/reject drafts — one question per turn |
 | **Dispatch** | Decompose, write spawn specs, triage STATUS + one line, post board |
 

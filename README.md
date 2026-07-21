@@ -56,6 +56,7 @@ split/ask. Details: `skills/copilot-minions/models.md`. Rationale:
 | `frontier.md` | Frontier dispatch rules, planning |
 | `loop.md` | Implement cycle, repo discovery |
 | `prompts.md` | Worker spawn templates |
+| `disciplines.md` | Discipline-skill wiring + fallbacks |
 | `models.md` | Routing + escalation |
 | `model-rationale.md` | Why each Copilot model was chosen |
 | `state.md` | Board format |
@@ -69,6 +70,16 @@ decompose → spawn (background) → implement → review → fix → … → co
 ```
 
 Planning: grill → PRD/issues workers → publish → orchestrate.
+
+## Discipline layer
+
+copilot-minions only **dispatches**. How workers implement, test, review, and spec
+comes from **discipline skills** — mostly from
+[`mattpocock/skills`](https://github.com/mattpocock/skills): `grilling`, `tdd`,
+`code-review`, `implement`, `to-spec`, `to-tickets`, plus `codebase-design` /
+`domain-modeling` / `diagnosing-bugs`. Each worker loads its discipline if
+installed, else falls back to inline constraints. See
+`skills/copilot-minions/disciplines.md`.
 
 ## License
 
