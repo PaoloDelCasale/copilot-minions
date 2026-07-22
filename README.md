@@ -90,6 +90,11 @@ explicit names.
 
 Opt out with `/direct`, `skip minions`, or `skip workers`.
 
+Each orchestration run declares one bounded Goal, completion criteria, out-of-scope
+work, fixed point, verification contract, and worker/triage budgets. After eight
+worker results the frontier stops dispatching, drains in-flight work, posts a full
+handoff, and closes the run. Adjacent issue slices require a new explicit Goal.
+
 ## Model stack
 
 Both platforms use the same routing:
@@ -143,7 +148,7 @@ selective. Verify and mandatory review gates remain unchanged.
 
 ```text
 skills/
-  core/                    shared workflow, prompts, board, models, worktrees
+  core/                    shared control gate, workflow, prompts, board, models, worktrees
   lb/                      low-budget model overlay
   copilot-minions/         Copilot entrypoint and capability adapter
   copilot-minions-lb/      Copilot low-budget entrypoint and adapter

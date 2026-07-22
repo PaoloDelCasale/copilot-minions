@@ -34,12 +34,21 @@ chat transcript.
 
 ## Orchestration
 
-1. Decompose into tasks with IDs, types, specs, paths, and dependency edges.
-2. Post the initial board from [`state.md`](state.md).
-3. Spawn only unblocked work, with at most six workers in flight.
+[`control.md`](control.md) is a hard gate, not guidance. Establish its bounded run
+contract before decomposition and apply its pre-spawn checks before every dispatch.
+
+1. Decompose only the current Goal into tasks with IDs, types, specs, paths, and
+   dependency edges.
+2. Post the run contract and initial full board from [`state.md`](state.md).
+3. Spawn only unblocked, in-scope work, with at most six workers in flight.
 4. Batch independent tasks; never parallelize dependent writes.
-5. Triage each worker result through the STATUS protocol.
-6. After eight triage events, post the full board and hand off to a new session.
+5. Triage each worker result through the STATUS protocol and increment the Triage
+   counter once per worker result.
+6. At eight triaged results, stop dispatching, drain in-flight work, post the full
+   handoff packet, and close the orchestration run.
+
+A broad request to continue does not silently expand the Goal. When the current
+`Done when` is satisfied, close or ask the user to choose one next bounded slice.
 
 Mode detection:
 
