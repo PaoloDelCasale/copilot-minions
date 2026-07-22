@@ -86,6 +86,77 @@ function defaultPiInvocation() {
   return { command: "pi", args: [] };
 }
 
+function taskLabel(task) {
+  const lines = String(task ?? "").split(/\r?\n/).map((line) => line.trim());
+  const taskId = lines.find((line) => /^Task ID:/i.test(line))?.replace(/^Task ID:\s*/i, "");
+  const preferred = ["Question", "Changes", "Goal", "Objective", "Request", "Spec"];
+  let summary;
+  for (const label of preferred) {
+    const match = lines.find((line) => new RegExp(`^${label}:\\s*`, "i").test(line));
+    if (match) {
+      summary = match.replace(new RegExp(`^${label}:\\s*`, "i"), "");
+      if (summary) break;
+    }
+  }
+  if (!summary) {
+    const metadata = /^(Task ID|Role|Working directory|Branch|Base ref|Discipline|Fixed point|Issue):/i;
+    summary = lines.find((line) => line && !metadata.test(line));
+  }
+  return { taskId, summary: summary || "Task details unavailable" };
+}
+
+function truncateLabel(text, width) {
+  if (width <= 0) return "";
+  if (text.length <= width) return text;
+  if (width === 1) return "…";
+  return `${text.slice(0, width - 1)}…`;
+}
+
+function formatElapsed(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m${String(remainder).padStart(2, "0")}s` : `${minutes}m`;
+}
+
+function combineUsage(...items) {
+  const usages = items.filter(Boolean);
+  if (usages.length === 0) return undefined;
+  const combined = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  let hasReasoning = false;
+  let hasCacheWrite1h = false;
+  for (const usage of usages) {
+    combined.input += usage.input ?? 0;
+    combined.output += usage.output ?? 0;
+    combined.cacheRead += usage.cacheRead ?? 0;
+    combined.cacheWrite += usage.cacheWrite ?? 0;
+    combined.totalTokens += usage.totalTokens ?? 0;
+    combined.cost.input += usage.cost?.input ?? 0;
+    combined.cost.output += usage.cost?.output ?? 0;
+    combined.cost.cacheRead += usage.cost?.cacheRead ?? 0;
+    combined.cost.cacheWrite += usage.cost?.cacheWrite ?? 0;
+    combined.cost.total += usage.cost?.total ?? 0;
+    if (usage.reasoning !== undefined) {
+      hasReasoning = true;
+      combined.reasoning = (combined.reasoning ?? 0) + usage.reasoning;
+    }
+    if (usage.cacheWrite1h !== undefined) {
+      hasCacheWrite1h = true;
+      combined.cacheWrite1h = (combined.cacheWrite1h ?? 0) + usage.cacheWrite1h;
+    }
+  }
+  if (!hasReasoning) delete combined.reasoning;
+  if (!hasCacheWrite1h) delete combined.cacheWrite1h;
+  return combined;
+}
+
 function attachJsonlReader(stream, onRecord) {
   const decoder = new StringDecoder("utf8");
   let buffer = "";
@@ -125,12 +196,15 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       id: worker.id,
       role: worker.role,
+      task: worker.task,
       cwd: worker.cwd,
       provider: worker.provider,
       model: worker.model,
       thinking: worker.thinking,
+      routeOverride: worker.routeOverride,
       status,
       startedAt: worker.startedAt,
+      completedAt: worker.completedAt,
       timeoutSeconds: worker.timeoutSeconds,
       currentTool: worker.currentTool,
       error: worker.error,
@@ -154,15 +228,51 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       ctx.ui.setWidget("pi-minions-workers", undefined);
       return;
     }
-    const workers = snapshot.workers ?? [];
-    const lines = [`Minions · ${snapshot.provider} · ${snapshot.variant}`];
-    if (workers.length === 0) lines.push("  no workers");
-    for (const worker of workers) {
-      const elapsedSeconds = Math.max(0, Math.floor((now() - worker.startedAt) / 1000));
-      const activity = worker.currentTool ? ` · ${worker.currentTool}` : "";
-      lines.push(`  ${worker.id.slice(0, 8)} · ${worker.role} · ${worker.status} · ${worker.model}:${worker.thinking} · ${elapsedSeconds}s${activity}`);
-    }
-    ctx.ui.setWidget("pi-minions-workers", lines, { placement: "aboveEditor" });
+    ctx.ui.setWidget("pi-minions-workers", (_tui, theme) => ({
+      render(width) {
+        const workers = snapshot.workers ?? [];
+        const counts = workers.reduce((result, worker) => {
+          result[worker.status] = (result[worker.status] ?? 0) + 1;
+          return result;
+        }, {});
+        const active = counts["in-flight"] ?? 0;
+        const done = counts.done ?? 0;
+        const statusParts = [theme.fg(active ? "success" : "muted", `${active} active`)];
+        if (done) statusParts.push(theme.fg("success", `${done} done`));
+        if (counts.blocked) statusParts.push(theme.fg("error", `${counts.blocked} blocked`));
+        if (counts.interrupted) statusParts.push(theme.fg("warning", `${counts.interrupted} interrupted`));
+        if (counts.stopped) statusParts.push(theme.fg("muted", `${counts.stopped} stopped`));
+        const lines = [
+          `${theme.fg("accent", theme.bold("Minions"))} ${theme.fg("dim", `· ${snapshot.provider} · ${snapshot.variant} ·`)} ${statusParts.join(theme.fg("dim", " · "))}`,
+        ];
+        const visibleWorkers = workers.filter((worker) => worker.status !== "done" && worker.status !== "stopped");
+        if (workers.length === 0) lines.push(theme.fg("muted", "  no workers"));
+        for (const worker of visibleWorkers) {
+          const { taskId, summary } = taskLabel(worker.task);
+          const visual = worker.status === "in-flight"
+            ? { symbol: "●", color: "success" }
+            : worker.status === "blocked"
+              ? { symbol: "!", color: "error" }
+              : { symbol: "◆", color: "warning" };
+          const identity = `${taskId ? `${taskId} · ` : ""}${worker.role}`;
+          const prefix = `  ${visual.symbol} ${identity} · `;
+          const shortSummary = truncateLabel(summary, Math.max(12, width - prefix.length));
+          lines.push(`${theme.fg(visual.color, `  ${visual.symbol}`)} ${theme.fg("accent", identity)}${theme.fg("dim", " · ")}${theme.fg("text", shortSummary)}`);
+
+          const elapsedEnd = worker.completedAt ?? now();
+          const elapsedSeconds = Math.max(0, Math.floor((elapsedEnd - worker.startedAt) / 1000));
+          const activity = worker.currentTool
+            ? theme.fg("accent", worker.currentTool)
+            : worker.error
+              ? theme.fg("error", truncateLabel(worker.error, Math.max(12, width - 4)))
+              : theme.fg("muted", worker.status);
+          const route = worker.routeOverride ? ` · override: ${worker.routeOverride}` : "";
+          lines.push(`    ${activity}${theme.fg("dim", ` · ${worker.model}:${worker.thinking}${route} · ${formatElapsed(elapsedSeconds)} · ${worker.id.slice(0, 8)}`)}`);
+        }
+        return lines;
+      },
+      invalidate() {},
+    }), { placement: "aboveEditor" });
   }
 
   function updateWorkerWidget(ctx) {
@@ -225,6 +335,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       provider: run.provider,
       model: modelId,
       thinking,
+      routeOverride: spec.routeOverride,
       status: "in-flight",
       output: "",
       stderr: "",
@@ -241,6 +352,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       worker.finalized = true;
       if (worker.timeoutTimer) cancelSchedule(worker.timeoutTimer);
       worker.status = status;
+      worker.completedAt = now();
       if (error) worker.error = error;
       persistRun();
       updateWorkerWidget(ctx);
@@ -262,7 +374,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (event.type === "message_end" && event.message?.role === "assistant") {
         const text = event.message.content?.find?.((part) => part.type === "text")?.text;
         if (text) worker.output = text;
-        worker.usage = event.message.usage;
+        worker.usage = combineUsage(worker.usage, event.message.usage);
+        worker.pendingUsage = combineUsage(worker.pendingUsage, event.message.usage);
         worker.stopReason = event.message.stopReason;
       }
       if (event.type === "tool_execution_start") {
@@ -368,7 +481,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const workers = tasks.map((task) => startWorker(task, ctx));
       persistRun();
       return textResult(`Spawned ${workers.length} background worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}. End this turn now; do not poll. Wait for completion notifications before calling minions_read.`, {
-        workers: workers.map(({ id, role, cwd, provider, model, thinking, status }) => ({ id, role, cwd, provider, model, thinking, status })),
+        workers: workers.map(({ id, role, cwd, provider, model, thinking, routeOverride, status }) => ({ id, role, cwd, provider, model, thinking, routeOverride, status })),
       });
     },
   });
@@ -381,18 +494,25 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     async execute(_id, params) {
       if (!run) throw new Error("No orchestration run is active.");
       const ids = params.workerIds?.length ? params.workerIds : [...run.workers.keys()];
-      const workers = ids.map((id) => {
+      const selectedWorkers = ids.map((id) => {
         const worker = run.workers.get(id);
         if (!worker) throw new Error(`Unknown worker: ${id}`);
-        const { role, task, cwd, provider, model, thinking, timeoutSeconds, status, output, progress, currentTool, stderr, error, exitCode, usage, stopReason } = worker;
-        return { id, role, task, cwd, provider, model, thinking, timeoutSeconds, status, output, progress, currentTool, stderr, error, exitCode, usage, stopReason };
+        return worker;
+      });
+      const workers = selectedWorkers.map((worker) => {
+        const { id, role, task, cwd, provider, model, thinking, routeOverride, timeoutSeconds, status, output, progress, currentTool, stderr, error, exitCode, usage, stopReason } = worker;
+        return { id, role, task, cwd, provider, model, thinking, routeOverride, timeoutSeconds, status, output, progress, currentTool, stderr, error, exitCode, usage, stopReason };
       });
       const summaries = workers.map((worker) => {
         const activity = worker.currentTool ? `Running ${worker.currentTool}${worker.progress ? `\n${worker.progress}` : ""}` : worker.progress;
         const body = worker.error || (worker.currentTool ? activity : undefined) || worker.output || worker.stderr || activity || "(no output yet)";
         return `### ${worker.id} · ${worker.role} · ${worker.status}\n${body}`;
       });
-      return textResult(truncateForContext(summaries.join("\n\n")), { workers });
+      const usage = combineUsage(...selectedWorkers.map((worker) => worker.pendingUsage));
+      for (const worker of selectedWorkers) worker.pendingUsage = undefined;
+      const result = textResult(truncateForContext(summaries.join("\n\n")), { workers });
+      if (usage) result.usage = usage;
+      return result;
     },
   });
 
@@ -425,6 +545,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         if (worker.status !== "in-flight") continue;
         worker.status = "stopped";
         worker.finalized = true;
+        worker.completedAt = now();
         updateWorkerWidget(ctx);
         worker.process.stdin.write(`${JSON.stringify({ type: "abort" })}\n`);
         const killTimer = schedule(() => worker.process.kill?.("SIGTERM"), 2000);
@@ -545,6 +666,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     for (const worker of activeWorkers) {
       worker.status = "stopped";
       worker.finalized = true;
+      worker.completedAt = now();
       try { worker.process.stdin.write(`${JSON.stringify({ type: "abort" })}\n`); } catch {}
       worker.process.kill?.("SIGTERM");
     }

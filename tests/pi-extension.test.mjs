@@ -3,6 +3,16 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { createPiMinionsExtension } from "../extensions/pi-minions/orchestrator.mjs";
 
+const plainTheme = {
+  fg(_color, text) { return text; },
+  bold(text) { return text; },
+};
+
+function renderWidget(content, width = 120) {
+  if (typeof content !== "function") return content;
+  return content({ requestRender() {} }, plainTheme).render(width);
+}
+
 function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", dependencies = {}, missingModels = [], frontierBusy = false, sessionEntries = [], setModelResults = [] } = {}) {
   const tools = new Map();
   const handlers = new Map();
@@ -39,7 +49,9 @@ function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", depende
     ui: {
       notify() {},
       setStatus() {},
-      setWidget(key, lines, options) { widgets.push({ key, lines, options }); },
+      setWidget(key, content, options) {
+        widgets.push({ key, content, lines: content ? renderWidget(content) : content, options });
+      },
     },
     sessionManager: {
       getSessionId() { return "parent-session"; },
@@ -266,7 +278,39 @@ test("read exposes the current RPC tool and its latest progress before the worke
   assert.equal(read.details.workers[0].currentTool, "bash");
 });
 
-test("the Pi widget shows live worker role, status, model, and current tool", async () => {
+test("read accounts worker token usage and cost exactly once in the parent session", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "mechanical", task: "Run verification" }],
+  }, harness.ctx);
+  const workerId = spawned.details.workers[0].id;
+  const firstUsage = { input: 100, output: 20, cacheRead: 30, cacheWrite: 4, reasoning: 5, totalTokens: 154, cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 } };
+  const secondUsage = { input: 50, output: 10, cacheRead: 5, cacheWrite: 2, reasoning: 3, totalTokens: 67, cost: { input: 0.5, output: 1, cacheRead: 0.5, cacheWrite: 2, total: 4 } };
+
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Checking" }], stopReason: "toolUse", usage: firstUsage } })}\n${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done" }], stopReason: "stop", usage: secondUsage } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+  const firstRead = await execute(harness.tools.get("minions_read"), { workerIds: [workerId] }, harness.ctx);
+  const secondRead = await execute(harness.tools.get("minions_read"), { workerIds: [workerId] }, harness.ctx);
+
+  assert.deepEqual(firstRead.usage, {
+    input: 150,
+    output: 30,
+    cacheRead: 35,
+    cacheWrite: 6,
+    reasoning: 8,
+    totalTokens: 221,
+    cost: { input: 1.5, output: 3, cacheRead: 3.5, cacheWrite: 6, total: 14 },
+  });
+  assert.deepEqual(firstRead.details.workers[0].usage, firstRead.usage);
+  assert.equal(secondRead.usage, undefined);
+  assert.deepEqual(secondRead.details.workers[0].usage, firstRead.usage);
+});
+
+test("the Pi widget shows a colored compact row with the worker task and current activity", async () => {
   const child = fakeRpcProcess();
   const harness = createHarness({ dependencies: {
     spawnProcess() { return child; },
@@ -274,16 +318,47 @@ test("the Pi widget shows live worker role, status, model, and current tool", as
   } });
   await execute(harness.tools.get("minions_start"), { variant: "lb" }, harness.ctx);
   await execute(harness.tools.get("minions_spawn"), {
-    tasks: [{ role: "mechanical", task: "Run verification" }],
+    tasks: [{ role: "mechanical", task: "Task ID: T4\nRole: mechanical\nWorking directory: /repo\nQuestion: Run the final verification gate", routeOverride: "mechanical-judgment" }],
   }, harness.ctx);
   child.stdout.emit("data", `${JSON.stringify({ type: "tool_execution_start", toolName: "bash" })}\n`);
 
   const visible = harness.widgets.at(-1);
+  const board = visible.lines.join("\n");
   assert.equal(visible.key, "pi-minions-workers");
-  assert.match(visible.lines.join("\n"), /mechanical/);
-  assert.match(visible.lines.join("\n"), /in-flight/);
-  assert.match(visible.lines.join("\n"), /gpt-5\.6-luna/);
-  assert.match(visible.lines.join("\n"), /bash/);
+  assert.equal(typeof visible.content, "function");
+  assert.match(board, /1 active/);
+  assert.match(board, /T4/);
+  assert.match(board, /mechanical/);
+  assert.match(board, /Run the final verification gate/);
+  assert.match(board, /gpt-5\.6-sol:medium/);
+  assert.match(board, /override: mechanical-judgment/);
+  assert.match(board, /bash/);
+});
+
+test("the Pi widget aggregates completed workers and freezes their elapsed duration", async () => {
+  const child = fakeRpcProcess();
+  let timestamp = 1_000;
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+    now() { return timestamp; },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Question: Inspect worker retention" }],
+  }, harness.ctx);
+
+  timestamp = 6_000;
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done" }], stopReason: "stop" } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+  const visible = harness.widgets.at(-1);
+  timestamp = 100_000;
+  const board = renderWidget(visible.content).join("\n");
+
+  assert.match(board, /0 active/);
+  assert.match(board, /1 done/);
+  assert.doesNotMatch(board, /Inspect worker retention/);
+  const snapshot = harness.appendedEntries.at(-1).data.workers[0];
+  assert.equal(snapshot.completedAt, 6_000);
 });
 
 test("an explicit worker deadline blocks and aborts a worker that does not settle", async () => {
