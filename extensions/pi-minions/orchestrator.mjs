@@ -31,15 +31,15 @@ const ROUTES = {
 
 const ROUTE_OVERRIDES = {
   "mechanical-judgment": {
-    standard: ["gpt-5.6-terra", "medium"],
-    lb: ["gpt-5.6-sol", "medium"],
+    standard: ["gpt-5.6-sol", "low"],
+    lb: ["gpt-5.6-luna", "xhigh"],
   },
   "escalate-entry": {
-    standard: ["gpt-5.6-luna", "xhigh"],
-    lb: ["gpt-5.6-luna", "high"],
+    standard: ["gpt-5.6-sol", "medium"],
+    lb: ["gpt-5.6-luna", "xhigh"],
   },
-  "escalate-terra-medium": {
-    standard: ["gpt-5.6-terra", "medium"],
+  "escalate-sol-low": {
+    lb: ["gpt-5.6-sol", "low"],
   },
   "escalate-sol-medium": {
     standard: ["gpt-5.6-sol", "medium"],
@@ -47,11 +47,9 @@ const ROUTE_OVERRIDES = {
   },
   "escalate-sol-high": {
     standard: ["gpt-5.6-sol", "high"],
-    lb: ["gpt-5.6-sol", "high"],
   },
   "escalate-sol-max": {
     standard: ["gpt-5.6-sol", "max"],
-    lb: ["gpt-5.6-sol", "max"],
   },
 };
 

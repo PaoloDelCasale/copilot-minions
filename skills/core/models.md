@@ -12,19 +12,30 @@ effort in board Notes. A user-requested model overrides the matrix for that batc
 | `architect` | Architecture, auth, payments, migrations, tricky logic | `gpt-5.6-sol` | medium |
 | `reviewer` | Independent review | `gpt-5.6-sol` | low |
 | `planner` | PRD and issue synthesis | `gpt-5.6-terra` | high |
-| `mechanical` | Merge conflict or GitHub judgment | `gpt-5.6-terra` | medium |
+| `mechanical` | Merge conflict or GitHub judgment | `gpt-5.6-sol` | low |
 
 Every spawn pins both model and effort. The platform adapter maps the semantic role to
 its native agent type or custom agent.
+
+## Named route overrides
+
+| Override | Model | Reasoning | Use |
+|----------|-------|-----------|-----|
+| `mechanical-judgment` | `gpt-5.6-sol` | low | Mechanical work requiring merge-conflict or GitHub judgment |
+| `escalate-entry` | `gpt-5.6-sol` | medium | First fresh retry after mediocre output, verification failure, or `BLOCKED` |
+| `escalate-sol-medium` | `gpt-5.6-sol` | medium | Explicit Sol-medium escalation entry |
+| `escalate-sol-high` | `gpt-5.6-sol` | high | High-effort escalation |
+| `escalate-sol-max` | `gpt-5.6-sol` | max | Last model escalation before splitting or asking the user |
+
+A named route override replaces both the role's default model and reasoning effort. It
+does not change the worker's role, responsibilities, or tool permissions.
 
 ## Escalation
 
 On mediocre output, verify failure, or `BLOCKED`, respawn fresh:
 
 ```text
-gpt-5.6-luna xhigh
-  -> gpt-5.6-terra medium
-  -> gpt-5.6-sol medium
+gpt-5.6-sol medium
   -> gpt-5.6-sol high/max
   -> split or ask the user
 ```

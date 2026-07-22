@@ -28,7 +28,7 @@ const schemas = {
       routeOverride: Type.Optional(StringEnum([
         "mechanical-judgment",
         "escalate-entry",
-        "escalate-terra-medium",
+        "escalate-sol-low",
         "escalate-sol-medium",
         "escalate-sol-high",
         "escalate-sol-max",

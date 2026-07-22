@@ -148,22 +148,66 @@ test("spawn tells the frontier to end its turn and wait for completion notificat
   assert.match(result.content[0].text, /do not poll/i);
 });
 
-test("mechanical judgment preserves the Terra medium route", async () => {
-  const spawns = [];
-  const harness = createHarness({ dependencies: {
-    spawnProcess(command, args, options) { spawns.push({ command, args, options }); return fakeRpcProcess(); },
-    piInvocation: { command: "pi", args: [] },
-  } });
-  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+test("mechanical judgment uses the profile-specific route", async () => {
+  const cases = [
+    { variant: "standard", model: "gpt-5.6-sol", thinking: "low" },
+    { variant: "lb", model: "gpt-5.6-luna", thinking: "xhigh" },
+  ];
 
-  await execute(harness.tools.get("minions_spawn"), { tasks: [{
-    role: "mechanical",
-    routeOverride: "mechanical-judgment",
-    task: "Resolve the merge conflict",
-  }] }, harness.ctx);
+  for (const { variant, model, thinking } of cases) {
+    const spawns = [];
+    const harness = createHarness({ dependencies: {
+      spawnProcess(command, args, options) { spawns.push({ command, args, options }); return fakeRpcProcess(); },
+      piInvocation: { command: "pi", args: [] },
+    } });
+    await execute(harness.tools.get("minions_start"), { variant }, harness.ctx);
 
-  assert.ok(spawns[0].args.includes("openai-codex/gpt-5.6-terra"));
-  assert.equal(spawns[0].args[spawns[0].args.indexOf("--thinking") + 1], "medium");
+    await execute(harness.tools.get("minions_spawn"), { tasks: [{
+      role: "mechanical",
+      routeOverride: "mechanical-judgment",
+      task: "Resolve the merge conflict",
+    }] }, harness.ctx);
+
+    assert.ok(spawns[0].args.includes(`openai-codex/${model}`));
+    assert.equal(spawns[0].args[spawns[0].args.indexOf("--thinking") + 1], thinking);
+  }
+});
+
+test("escalation routes follow the standard and low-budget ladders", async () => {
+  const validCases = [
+    { variant: "standard", routeOverride: "escalate-entry", model: "gpt-5.6-sol", thinking: "medium" },
+    { variant: "standard", routeOverride: "escalate-sol-high", model: "gpt-5.6-sol", thinking: "high" },
+    { variant: "standard", routeOverride: "escalate-sol-max", model: "gpt-5.6-sol", thinking: "max" },
+    { variant: "lb", routeOverride: "escalate-entry", model: "gpt-5.6-luna", thinking: "xhigh" },
+    { variant: "lb", routeOverride: "escalate-sol-low", model: "gpt-5.6-sol", thinking: "low" },
+    { variant: "lb", routeOverride: "escalate-sol-medium", model: "gpt-5.6-sol", thinking: "medium" },
+  ];
+
+  for (const { variant, routeOverride, model, thinking } of validCases) {
+    const spawns = [];
+    const harness = createHarness({ dependencies: {
+      spawnProcess(command, args, options) { spawns.push({ command, args, options }); return fakeRpcProcess(); },
+      piInvocation: { command: "pi", args: [] },
+    } });
+    await execute(harness.tools.get("minions_start"), { variant }, harness.ctx);
+    await execute(harness.tools.get("minions_spawn"), {
+      tasks: [{ role: "implementer", routeOverride, task: "Retry the failed work" }],
+    }, harness.ctx);
+
+    assert.ok(spawns[0].args.includes(`openai-codex/${model}`));
+    assert.equal(spawns[0].args[spawns[0].args.indexOf("--thinking") + 1], thinking);
+  }
+
+  for (const routeOverride of ["escalate-sol-high", "escalate-sol-max"]) {
+    const harness = createHarness();
+    await execute(harness.tools.get("minions_start"), { variant: "lb" }, harness.ctx);
+    await assert.rejects(
+      execute(harness.tools.get("minions_spawn"), {
+        tasks: [{ role: "implementer", routeOverride, task: "Retry the failed work" }],
+      }, harness.ctx),
+      new RegExp(`${routeOverride} is not available for lb`),
+    );
+  }
 });
 
 test("worker steering, stopping, and close are exposed through managed tools", async () => {

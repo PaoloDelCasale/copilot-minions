@@ -2,8 +2,8 @@
 
 The orchestrator uses one GPT-5.6 family and the same model IDs on every platform.
 Tracer-bullet decomposition makes Luna viable for bounded daily work; Sol is reserved
-for complex implementation and independent review; Terra handles structured planning
-and the first escalation step.
+for complex implementation, independent review, and escalation; Terra handles
+structured planning.
 
 | Role | Choice | Rationale |
 |------|--------|-----------|
