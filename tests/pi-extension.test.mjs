@@ -374,7 +374,7 @@ test("the Pi widget shows a colored compact row with the worker task and current
   assert.match(board, /T4/);
   assert.match(board, /mechanical/);
   assert.match(board, /Run the final verification gate/);
-  assert.match(board, /gpt-5\.6-sol:medium/);
+  assert.match(board, /gpt-5\.6-luna:xhigh/);
   assert.match(board, /override: mechanical-judgment/);
   assert.match(board, /bash/);
 });
