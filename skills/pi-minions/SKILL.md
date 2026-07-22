@@ -15,6 +15,7 @@ worker STATUS. Workers perform repository and command work.
 Read [`platform.md`](platform.md) first, then:
 
 - [`frontier.md`](frontier.md) for dispatch and planning
+- [`control.md`](control.md) for the mandatory run contract, budgets, and handoff gate
 - [`loop.md`](loop.md) for implementation and review
 - [`prompts.md`](prompts.md) for worker contracts
 - [`models.md`](models.md) for exact routing

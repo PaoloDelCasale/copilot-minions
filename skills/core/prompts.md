@@ -33,6 +33,7 @@ Spec: <acceptance criteria>
 Files: <paths>
 Issue: <reference or none>
 Working directory: <absolute worktree>
+Verify contract: <canonical commands, environment, required integrations>
 
 Constraints:
 - Preflight cwd, branch, and HEAD.
@@ -73,6 +74,40 @@ Changes:
 1. <blocking finding with file reference>
 ```
 
+## Integrated review
+
+Use after reconciling pre-existing branches and again before landing a stacked change.
+
+```text
+Task ID: <id>
+Role: reviewer
+Discipline: load code-review if available.
+Fixed point: <remote default or issue baseline SHA>
+Integrated HEAD: <SHA>
+Spec: <complete issue acceptance criteria>
+Inputs: <branches and commits reconciled>
+Verify result: <one line, including skipped required integrations>
+Working directory: <absolute worktree>
+
+Constraints:
+- Read-only and scoped to the worktree.
+- Confirm the fixed point and cumulative committed diff.
+- Review git diff <fixed>...<integrated HEAD>, not only the latest slice.
+- Trace every acceptance criterion to code and tests.
+- Check migrations, authorization invariants, compatibility, rollback, and
+  cross-slice interactions.
+- Do not rerun lint, tests, or typecheck.
+- Put only correctness/security/regression/test blockers under Changes; report
+  publication or issue-tracker work separately as Landing tasks.
+
+Output:
+STATUS: REVIEW_APPROVED | REVIEW_CHANGES_REQUIRED | BLOCKED
+Changes:
+1. <blocking finding with file reference>
+Landing tasks:
+1. <non-code follow-up or none>
+```
+
 ## Fix review
 
 ```text
@@ -80,16 +115,20 @@ Task ID: <id>
 Role: implementer | architect
 Discipline: load tdd if available.
 Changes: <verbatim reviewer findings>
+Cumulative review history: <all findings for this slice>
+Regression matrix: <required after the second changes-required result, otherwise none>
 Working directory: <absolute worktree>
 
 Constraints:
 - Reproduce each issue with a failing test where practical.
+- After the second changes-required result, use role `architect` and cover every
+  invariant in the regression matrix before editing.
 - Fix only reviewer findings and direct consequences.
-- Rerun the verify gate.
+- Rerun the verify contract; required skipped integrations are concerns, not passes.
 - Do not commit; final commit is a separate worker.
 
 Output: verify result and diff stat.
-STATUS: DONE | BLOCKED
+STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED
 ```
 
 ## Commit
@@ -124,6 +163,25 @@ Constraints:
 
 Output: outcome <=5 lines.
 STATUS: DONE | NEEDS_USER_INPUT | BLOCKED
+```
+
+## Verify contract discovery
+
+```text
+Task ID: <id>
+Role: mechanical
+Working directory: <absolute repository or worktree>
+Spec: Discover the canonical verification contract without changing the environment.
+
+Constraints:
+- Read repository instructions and existing configuration.
+- Identify interpreter/runtime, exact lint/test/typecheck commands, required external
+  integrations, expected duration, and deterministic sharding if timeout is likely.
+- Do not install dependencies or edit files.
+- Distinguish required checks from optional checks and pre-existing baseline failures.
+
+Output: one reusable verify contract <=10 lines.
+STATUS: DONE | BLOCKED
 ```
 
 ## Worktree setup

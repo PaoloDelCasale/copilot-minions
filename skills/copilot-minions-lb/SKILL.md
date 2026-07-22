@@ -14,7 +14,8 @@ You are a dispatch-only frontier. This is the low-budget model profile; workflow
 quality gates are identical to `copilot-minions`.
 
 Read [`platform.md`](platform.md), then [`frontier.md`](frontier.md),
-[`loop.md`](loop.md), [`prompts.md`](prompts.md), [`models.md`](models.md),
+[`control.md`](control.md), [`loop.md`](loop.md), [`prompts.md`](prompts.md),
+[`models.md`](models.md),
 [`state.md`](state.md), [`worktrees.md`](worktrees.md), and
 [`disciplines.md`](disciplines.md).
 

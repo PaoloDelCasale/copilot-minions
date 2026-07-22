@@ -80,6 +80,10 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $copilotSkill 'frontier.md')) 'Copilot contains shared core'
     Assert-True (Test-Path (Join-Path $codexSkill 'frontier.md')) 'Codex contains shared core'
     Assert-True (Test-Path (Join-Path $piSkill 'frontier.md')) 'Pi contains shared core'
+    Assert-True (Test-Path (Join-Path $copilotSkill 'control.md')) 'Copilot contains control gate'
+    Assert-True (Test-Path (Join-Path $codexSkill 'control.md')) 'Codex contains control gate'
+    Assert-True (Test-Path (Join-Path $piSkill 'control.md')) 'Pi contains control gate'
+    Assert-True ((Get-Content (Join-Path $piSkill 'control.md') -Raw) -match 'Triage: 8/8') 'Control gate contains hard handoff budget'
     Assert-True (Test-Path (Join-Path $piSkill 'platform.md')) 'Pi contains adapter'
     Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'
     Assert-True (Test-Path (Join-Path $copilotSkill 'platform.md')) 'Copilot contains adapter'
@@ -112,6 +116,7 @@ exit /b 0
     & (Join-Path $root 'install.ps1') -Platform all -Variant all | Out-Null
     Assert-True (Test-Path (Join-Path $testHome '.copilot\skills\copilot-minions-lb')) 'LB Copilot skill is installed'
     Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb')) 'LB Pi skill is installed'
+    Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb\control.md')) 'LB Pi contains control gate'
     Assert-True (@(Get-ChildItem -LiteralPath $agentDirectory -Filter 'codex-minions*.toml').Count -eq 12) 'Both Codex variants install twelve agents'
     Assert-True (Test-Path (Join-Path $agentDirectory '.codex-minions-lb-manifest')) 'LB agent manifest is installed'
 

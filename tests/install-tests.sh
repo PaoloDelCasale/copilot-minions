@@ -86,6 +86,10 @@ AGENTS="${MINIONS_HOME}/.codex/agents"
 [[ -f "${COPILOT_SKILL}/frontier.md" ]]
 [[ -f "${CODEX_SKILL}/frontier.md" ]]
 [[ -f "${PI_SKILL}/frontier.md" ]]
+[[ -f "${COPILOT_SKILL}/control.md" ]]
+[[ -f "${CODEX_SKILL}/control.md" ]]
+[[ -f "${PI_SKILL}/control.md" ]]
+grep -Fq 'Triage: 8/8' "${PI_SKILL}/control.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
 [[ -f "${PI_EXTENSION}/index.ts" ]]
 [[ -f "${COPILOT_SKILL}/platform.md" ]]
@@ -111,6 +115,7 @@ export MINIONS_TEST_MODELS=complete
 bash "${ROOT}/install.sh" --platform all --variant all >/dev/null
 [[ -f "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/SKILL.md" ]]
 [[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/SKILL.md" ]]
+[[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/control.md" ]]
 [[ "$(count_files "${AGENTS}"/codex-minions*.toml)" -eq 12 ]]
 [[ -f "${AGENTS}/.codex-minions-lb-manifest" ]]
 

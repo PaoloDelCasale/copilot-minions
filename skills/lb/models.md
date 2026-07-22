@@ -31,6 +31,17 @@ low-budget profile. A named route override replaces both the role's default mode
 reasoning effort. It does not change the worker's role, responsibilities, or tool
 permissions.
 
+## Route discipline
+
+- `mechanical-judgment` is valid only with role `mechanical` and only for its documented
+  merge-conflict or GitHub judgment use.
+- Escalation overrides require a recorded mediocre result, verification failure, or
+  `BLOCKED`; never use one as a general quality upgrade.
+- Before spawn, record the expected model and effort. When the adapter exposes the
+  actual runtime route, compare it and record it in the board.
+- A reported role/route mismatch is a protocol error: stop dispatching and report it
+  instead of silently continuing on a different cost profile.
+
 ## Escalation
 
 ```text
