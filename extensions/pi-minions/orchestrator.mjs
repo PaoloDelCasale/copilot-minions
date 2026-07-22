@@ -114,10 +114,65 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   const spawnProcess = dependencies.spawnProcess ?? nodeSpawn;
   const piInvocation = dependencies.piInvocation ?? defaultPiInvocation();
   const schedule = dependencies.setTimeout ?? setTimeout;
+  const cancelSchedule = dependencies.clearTimeout ?? clearTimeout;
+  const now = dependencies.now ?? Date.now;
   let run;
   let changingModel = false;
   let completionTimer;
   const pendingCompletions = new Set();
+
+  function workerSnapshot(worker, status = worker.status) {
+    return {
+      id: worker.id,
+      role: worker.role,
+      cwd: worker.cwd,
+      provider: worker.provider,
+      model: worker.model,
+      thinking: worker.thinking,
+      status,
+      startedAt: worker.startedAt,
+      timeoutSeconds: worker.timeoutSeconds,
+      currentTool: worker.currentTool,
+      error: worker.error,
+    };
+  }
+
+  function persistRun(lifecycle = "active", workerStatus) {
+    if (!run) return;
+    pi.appendEntry("pi-minions-state", {
+      runId: run.id,
+      provider: run.provider,
+      variant: run.variant,
+      lifecycle,
+      workers: [...run.workers.values()].map((worker) => workerSnapshot(worker, workerStatus ?? worker.status)),
+    });
+  }
+
+  function renderWorkerWidget(ctx, snapshot) {
+    if (!ctx.ui?.setWidget) return;
+    if (!snapshot) {
+      ctx.ui.setWidget("pi-minions-workers", undefined);
+      return;
+    }
+    const workers = snapshot.workers ?? [];
+    const lines = [`Minions · ${snapshot.provider} · ${snapshot.variant}`];
+    if (workers.length === 0) lines.push("  no workers");
+    for (const worker of workers) {
+      const elapsedSeconds = Math.max(0, Math.floor((now() - worker.startedAt) / 1000));
+      const activity = worker.currentTool ? ` · ${worker.currentTool}` : "";
+      lines.push(`  ${worker.id.slice(0, 8)} · ${worker.role} · ${worker.status} · ${worker.model}:${worker.thinking} · ${elapsedSeconds}s${activity}`);
+    }
+    ctx.ui.setWidget("pi-minions-workers", lines, { placement: "aboveEditor" });
+  }
+
+  function updateWorkerWidget(ctx) {
+    if (!run) return renderWorkerWidget(ctx, undefined);
+    renderWorkerWidget(ctx, {
+      provider: run.provider,
+      variant: run.variant,
+      workers: [...run.workers.values()].map((worker) => workerSnapshot(worker)),
+    });
+  }
 
   function notifyCompletion(worker) {
     pendingCompletions.add(worker.id);
@@ -132,7 +187,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         content: `Worker completion notification: ${ids.join(", ")}. Read each worker, update the board, and dispatch newly unblocked work.`,
         display: true,
         details: { runId: run.id, workerIds: ids },
-      }, { deliverAs: "followUp", triggerTurn: true });
+      }, { deliverAs: "steer", triggerTurn: true });
     }, 50);
   }
 
@@ -175,16 +230,32 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       stderr: "",
       process: child,
       finalized: false,
+      startedAt: now(),
+      timeoutSeconds: spec.timeoutSeconds,
     };
     run.workers.set(id, worker);
+    updateWorkerWidget(ctx);
 
     const finalize = (status, error) => {
       if (worker.finalized) return;
       worker.finalized = true;
+      if (worker.timeoutTimer) cancelSchedule(worker.timeoutTimer);
       worker.status = status;
       if (error) worker.error = error;
+      persistRun();
+      updateWorkerWidget(ctx);
       if (status !== "stopped") notifyCompletion(worker);
     };
+    if (spec.timeoutSeconds) {
+      worker.timeoutTimer = schedule(() => {
+        if (worker.finalized) return;
+        try { child.stdin.write(`${JSON.stringify({ type: "abort" })}\n`); } catch {}
+        finalize("blocked", `Worker exceeded its ${spec.timeoutSeconds} seconds deadline.`);
+        const killTimer = schedule(() => child.kill?.("SIGTERM"), 2000);
+        killTimer?.unref?.();
+      }, spec.timeoutSeconds * 1000);
+      worker.timeoutTimer?.unref?.();
+    }
     attachJsonlReader(child.stdout, (line) => {
       let event;
       try { event = JSON.parse(line); } catch { return; }
@@ -193,6 +264,23 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         if (text) worker.output = text;
         worker.usage = event.message.usage;
         worker.stopReason = event.message.stopReason;
+      }
+      if (event.type === "tool_execution_start") {
+        worker.currentTool = event.toolName;
+        worker.progress = "";
+        updateWorkerWidget(ctx);
+      }
+      if (event.type === "tool_execution_update") {
+        worker.currentTool = event.toolName ?? worker.currentTool;
+        const text = event.partialResult?.content?.find?.((part) => part.type === "text")?.text;
+        if (text) worker.progress = text;
+        updateWorkerWidget(ctx);
+      }
+      if (event.type === "tool_execution_end") {
+        const text = event.result?.content?.find?.((part) => part.type === "text")?.text;
+        if (text) worker.progress = text;
+        worker.currentTool = undefined;
+        updateWorkerWidget(ctx);
       }
       if (event.type === "response" && event.command === "prompt" && event.success === false) {
         finalize("blocked", event.error || "Worker prompt was rejected.");
@@ -254,6 +342,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         workers: new Map(),
       };
       ctx.ui?.setStatus?.("pi-minions", `${provider} · ${variant}`);
+      persistRun();
+      updateWorkerWidget(ctx);
       return textResult(`Started ${variant} orchestration with Provider Affinity ${provider}.`, {
         runId: run.id,
         provider,
@@ -276,7 +366,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const inFlight = [...run.workers.values()].filter((worker) => worker.status === "in-flight").length;
       if (inFlight + tasks.length > 6) throw new Error("Pi minions allows at most six in-flight workers.");
       const workers = tasks.map((task) => startWorker(task, ctx));
-      return textResult(`Spawned ${workers.length} background worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.`, {
+      persistRun();
+      return textResult(`Spawned ${workers.length} background worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}. End this turn now; do not poll. Wait for completion notifications before calling minions_read.`, {
         workers: workers.map(({ id, role, cwd, provider, model, thinking, status }) => ({ id, role, cwd, provider, model, thinking, status })),
       });
     },
@@ -293,12 +384,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const workers = ids.map((id) => {
         const worker = run.workers.get(id);
         if (!worker) throw new Error(`Unknown worker: ${id}`);
-        const { role, task, cwd, provider, model, thinking, status, output, stderr, error, exitCode, usage, stopReason } = worker;
-        return { id, role, task, cwd, provider, model, thinking, status, output, stderr, error, exitCode, usage, stopReason };
+        const { role, task, cwd, provider, model, thinking, timeoutSeconds, status, output, progress, currentTool, stderr, error, exitCode, usage, stopReason } = worker;
+        return { id, role, task, cwd, provider, model, thinking, timeoutSeconds, status, output, progress, currentTool, stderr, error, exitCode, usage, stopReason };
       });
-      const summaries = workers.map((worker) =>
-        `### ${worker.id} · ${worker.role} · ${worker.status}\n${worker.output || worker.error || worker.stderr || "(no output yet)"}`,
-      );
+      const summaries = workers.map((worker) => {
+        const activity = worker.currentTool ? `Running ${worker.currentTool}${worker.progress ? `\n${worker.progress}` : ""}` : worker.progress;
+        const body = worker.error || (worker.currentTool ? activity : undefined) || worker.output || worker.stderr || activity || "(no output yet)";
+        return `### ${worker.id} · ${worker.role} · ${worker.status}\n${body}`;
+      });
       return textResult(truncateForContext(summaries.join("\n\n")), { workers });
     },
   });
@@ -323,7 +416,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     label: "Stop Minions",
     description: "Abort and stop one or more managed Pi workers.",
     parameters: schemas.stop ?? {},
-    async execute(_id, params) {
+    async execute(_id, params, _signal, _onUpdate, ctx) {
       if (!run) throw new Error("No orchestration run is active.");
       const ids = params.workerIds?.length ? params.workerIds : [...run.workers.values()].filter((worker) => worker.status === "in-flight").map((worker) => worker.id);
       for (const id of ids) {
@@ -332,10 +425,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         if (worker.status !== "in-flight") continue;
         worker.status = "stopped";
         worker.finalized = true;
+        updateWorkerWidget(ctx);
         worker.process.stdin.write(`${JSON.stringify({ type: "abort" })}\n`);
         const killTimer = schedule(() => worker.process.kill?.("SIGTERM"), 2000);
         killTimer?.unref?.();
       }
+      persistRun();
       return textResult(`Stopped ${ids.length} worker(s).`, { workerIds: ids });
     },
   });
@@ -350,6 +445,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const active = [...run.workers.values()].filter((worker) => worker.status === "in-flight");
       if (active.length > 0) throw new Error(`Cannot close with ${active.length} in-flight worker(s).`);
       const closing = run;
+      persistRun("closed");
       run = undefined;
       if (closing.originalModel) {
         changingModel = true;
@@ -360,12 +456,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
           pi.setThinkingLevel(closing.originalThinking);
         } catch (error) {
           run = closing;
+          persistRun();
           throw error;
         } finally {
           changingModel = false;
         }
       }
       ctx.ui?.setStatus?.("pi-minions", undefined);
+      updateWorkerWidget(ctx);
       return textResult(`Closed orchestration ${closing.id} and restored the original model.`, { runId: closing.id });
     },
   });
@@ -384,7 +482,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\nPi harness routing: use pi-minions or pi-minions-lb for orchestration. Never use the Codex minions adapter inside Pi.`,
+    systemPrompt: `${event.systemPrompt}\n\nPi harness routing: use pi-minions or pi-minions-lb for orchestration. Never use the Codex minions adapter inside Pi. After minions_spawn, end the turn immediately and do not poll minions_read; wait for a pi-minions-completion notification.`,
   }));
 
   pi.on("model_select", async (event, ctx) => {
@@ -409,11 +507,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
 
   pi.on("session_start", (_event, ctx) => {
     let interrupted;
+    let lastState;
     for (const entry of ctx.sessionManager.getEntries?.() ?? []) {
       if (entry.type !== "custom") continue;
+      if (entry.customType === "pi-minions-state") lastState = entry.data;
       if (entry.customType === "pi-minions-reload-interrupted") interrupted = entry.data;
       if (entry.customType === "pi-minions-reload-notified") interrupted = undefined;
     }
+    if (lastState?.lifecycle === "interrupted") renderWorkerWidget(ctx, lastState);
     if (!interrupted) return;
     ctx.ui?.notify?.(`Reload stopped ${interrupted.workerCount} active Pi minions worker(s).`, "warning");
     pi.appendEntry("pi-minions-reload-notified", { interruptedAt: interrupted.timestamp });
@@ -447,6 +548,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       try { worker.process.stdin.write(`${JSON.stringify({ type: "abort" })}\n`); } catch {}
       worker.process.kill?.("SIGTERM");
     }
+    persistRun(event.reason === "reload" ? "interrupted" : "closed", event.reason === "reload" ? "interrupted" : undefined);
     run = undefined;
   });
 }
