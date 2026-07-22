@@ -115,6 +115,13 @@ model is qualified with that same provider. Missing required models fail preflig
 there is no cross-provider or availability fallback. Closing the run restores the
 parent's original model and thinking level.
 
+Pi renders a live worker widget above the editor with role, status, routed model,
+elapsed time, and current RPC tool. Worker lifecycle snapshots survive reloads so
+interrupted work remains visible, while the worker subprocesses themselves stay
+ephemeral. Completion notifications interrupt a busy frontier; the frontier ends its
+turn after spawning instead of polling. Spawn tasks may also set `timeoutSeconds` for
+an orchestrator-enforced hard deadline.
+
 ### Low-budget stack
 
 Inspired by the model routing in

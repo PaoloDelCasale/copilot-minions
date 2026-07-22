@@ -34,6 +34,11 @@ const schemas = {
         "escalate-sol-max",
       ] as const, { description: "Named route from the documented judgment or escalation ladder." })),
       modelOverride: Type.Optional(Type.String({ description: "Model ID only; use exclusively for an explicit user override." })),
+      timeoutSeconds: Type.Optional(Type.Integer({
+        minimum: 1,
+        maximum: 3600,
+        description: "Optional hard worker deadline in seconds.",
+      })),
     }), { minItems: 1, maxItems: 6 }),
   }),
   read: Type.Object({
