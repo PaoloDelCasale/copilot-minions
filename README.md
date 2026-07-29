@@ -132,12 +132,16 @@ provider-specific. Missing models fail preflight; there is no cross-provider or
 availability fallback. Closing the run restores the
 parent's original model and thinking level.
 
-Pi renders a live worker widget above the editor with role, status, routed model,
-elapsed time, and current RPC tool. Worker lifecycle snapshots survive reloads so
-interrupted work remains visible, while the worker subprocesses themselves stay
-ephemeral. Completion notifications interrupt a busy frontier; the frontier ends its
-turn after spawning instead of polling. Spawn tasks may also set `timeoutSeconds` for
-an orchestrator-enforced hard deadline.
+Pi renders a responsive worker-usage table above the editor with one row per active
+worker and at most seven lines total. Rows show a stable worker alias, role, routed
+model, grouped tokens, cost, and elapsed time when width permits; the summary shows
+combined parent-and-worker Session Usage. Terminal workers leave the table and emit
+short aggregated notifications. Lifecycle snapshots remain diagnostic across reloads,
+but interrupted workers are not rendered or treated as resumable because worker
+subprocesses stay ephemeral. Worker usage is accounted exactly once through reads,
+with close flushing any remainder. Completion notifications interrupt a busy frontier;
+the frontier ends its turn after spawning instead of polling. Spawn tasks may also set
+`timeoutSeconds` for an orchestrator-enforced hard deadline.
 
 ### Low-budget stack
 
