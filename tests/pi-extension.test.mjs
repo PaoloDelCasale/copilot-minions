@@ -21,6 +21,7 @@ function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", depende
   const sentMessages = [];
   const deliveredMessages = [];
   const widgets = [];
+  const notifications = [];
   const appendedEntries = [];
   const pi = {
     registerTool(tool) { tools.set(tool.name, tool); },
@@ -51,7 +52,7 @@ function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", depende
     },
     isProjectTrusted() { return true; },
     ui: {
-      notify() {},
+      notify(message, level) { notifications.push({ message, level }); },
       setStatus() {},
       setWidget(key, content, options) {
         widgets.push({ key, content, lines: content ? renderWidget(content) : content, options });
@@ -60,10 +61,11 @@ function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", depende
     sessionManager: {
       getSessionId() { return "parent-session"; },
       getEntries() { return sessionEntries; },
+      getBranch() { return sessionEntries; },
     },
   };
   createPiMinionsExtension(pi, { schemas: {}, ...dependencies });
-  return { pi, tools, handlers, ctx, modelChanges, thinkingChanges, sentMessages, deliveredMessages, widgets, appendedEntries };
+  return { pi, tools, handlers, ctx, modelChanges, thinkingChanges, sentMessages, deliveredMessages, widgets, notifications, appendedEntries };
 }
 
 async function execute(tool, params, ctx) {
@@ -305,6 +307,36 @@ test("worker steering, stopping, and close are exposed through managed tools", a
   assert.equal(harness.thinkingChanges.at(-1), "high");
 });
 
+test("close credits all worker usage not yet returned by read", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Explore" }],
+  }, harness.ctx);
+  const usage = {
+    input: 100,
+    output: 20,
+    cacheRead: 30,
+    cacheWrite: 4,
+    totalTokens: 154,
+    cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0.001, total: 0.034 },
+  };
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+    role: "assistant",
+    content: [{ type: "text", text: "Done" }],
+    stopReason: "stop",
+    usage,
+  } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+
+  const closed = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
+
+  assert.deepEqual(closed.usage, usage);
+});
+
 test("close restores the original Copilot model and thinking level", async () => {
   const harness = createHarness({ provider: "github-copilot", modelId: "gpt-4.1" });
   await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
@@ -433,7 +465,7 @@ test("read accounts worker token usage and cost exactly once in the parent sessi
   assert.deepEqual(secondRead.details.workers[0].usage, firstRead.usage);
 });
 
-test("the Pi widget shows a colored compact row with the worker task and current activity", async () => {
+test("the Pi widget renders one usage row per Active Worker without long activity text", async () => {
   const child = fakeRpcProcess();
   const harness = createHarness({ dependencies: {
     spawnProcess() { return child; },
@@ -443,22 +475,225 @@ test("the Pi widget shows a colored compact row with the worker task and current
   await execute(harness.tools.get("minions_spawn"), {
     tasks: [{ role: "mechanical", task: "Task ID: T4\nRole: mechanical\nWorking directory: /repo\nQuestion: Run the final verification gate", routeOverride: "mechanical-judgment" }],
   }, harness.ctx);
-  child.stdout.emit("data", `${JSON.stringify({ type: "tool_execution_start", toolName: "bash" })}\n`);
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+    role: "assistant",
+    content: [{ type: "text", text: "Starting verification" }],
+    stopReason: "toolUse",
+    usage: {
+      input: 10_000,
+      output: 2_000,
+      cacheRead: 300,
+      cacheWrite: 40,
+      totalTokens: 12_340,
+      cost: { input: 0.02, output: 0.02, cacheRead: 0.006, cacheWrite: 0.001, total: 0.047 },
+    },
+  } })}\n${JSON.stringify({ type: "tool_execution_start", toolName: "bash" })}\n`);
 
   const visible = harness.widgets.at(-1);
   const board = visible.lines.join("\n");
   assert.equal(visible.key, "pi-minions-workers");
   assert.equal(typeof visible.content, "function");
-  assert.match(board, /1 active/);
-  assert.match(board, /T4/);
+  assert.equal(visible.lines.length, 2);
+  assert.match(board, /MINIONS LB 1\/6/);
+  assert.match(board, /SESSION 12\.3k.*\$0\.047/);
+  assert.match(board, /W1/);
   assert.match(board, /mechanical/);
-  assert.match(board, /Run the final verification gate/);
-  assert.match(board, /gpt-5\.6-luna:xhigh/);
-  assert.match(board, /override: mechanical-judgment/);
-  assert.match(board, /bash/);
+  assert.match(board, /luna:xhigh/);
+  assert.match(board, /12\.3k/);
+  assert.match(board, /\$0\.047/);
+  assert.doesNotMatch(board, /T4|Run the final verification gate|bash|override|[0-9a-f]{8}/);
 });
 
-test("the Pi widget aggregates completed workers and freezes their elapsed duration", async () => {
+test("the Pi widget preserves a non-zero reported cost instead of rounding it to zero", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Explore" }],
+  }, harness.ctx);
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+    role: "assistant",
+    content: [{ type: "text", text: "Working" }],
+    stopReason: "toolUse",
+    usage: {
+      input: 1,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 1,
+      cost: { input: 0.00004, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.00004 },
+    },
+  } })}\n`);
+
+  const board = harness.widgets.at(-1).lines.join("\n");
+  assert.match(board, /\$0\.00004/);
+  assert.doesNotMatch(board, /\$0\.0000(?:\D|$)/);
+});
+
+test("the Pi widget refreshes elapsed time once per second only while workers are active", async () => {
+  const child = fakeRpcProcess();
+  const widgetSchedules = [];
+  const cancelled = [];
+  let timestamp = 1_000;
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+    now() { return timestamp; },
+    setWidgetTimeout(callback, delay) {
+      const id = widgetSchedules.length + 1;
+      widgetSchedules.push({ id, callback, delay });
+      return id;
+    },
+    clearWidgetTimeout(id) { cancelled.push(id); },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Explore" }],
+  }, harness.ctx);
+
+  assert.equal(widgetSchedules[0].delay, 1_000);
+  timestamp = 4_000;
+  widgetSchedules[0].callback();
+  assert.match(harness.widgets.at(-1).lines.join("\n"), /3s/);
+
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+  assert.ok(cancelled.includes(widgetSchedules[1].id));
+});
+
+test("the Pi widget Session Usage combines parent usage with uncredited worker usage", async () => {
+  const child = fakeRpcProcess();
+  const parentUsage = {
+    input: 700,
+    output: 200,
+    cacheRead: 100,
+    cacheWrite: 0,
+    totalTokens: 1_000,
+    cost: { input: 0.05, output: 0.04, cacheRead: 0.01, cacheWrite: 0, total: 0.10 },
+  };
+  const harness = createHarness({
+    sessionEntries: [{ type: "message", message: { role: "assistant", usage: parentUsage } }],
+    dependencies: {
+      spawnProcess() { return child; },
+      piInvocation: { command: "pi", args: [] },
+    },
+  });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Explore" }],
+  }, harness.ctx);
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+    role: "assistant",
+    content: [{ type: "text", text: "Working" }],
+    stopReason: "toolUse",
+    usage: {
+      input: 300,
+      output: 100,
+      cacheRead: 100,
+      cacheWrite: 0,
+      totalTokens: 500,
+      cost: { input: 0.02, output: 0.02, cacheRead: 0.01, cacheWrite: 0, total: 0.05 },
+    },
+  } })}\n`);
+
+  const board = harness.widgets.at(-1).lines.join("\n");
+  assert.match(board, /SESSION 1\.5k.*\$0\.15/);
+});
+
+test("the Pi widget Session Usage does not double count worker usage credited by read", async () => {
+  const child = fakeRpcProcess();
+  const parentUsage = {
+    input: 700,
+    output: 200,
+    cacheRead: 100,
+    cacheWrite: 0,
+    totalTokens: 1_000,
+    cost: { input: 0.05, output: 0.04, cacheRead: 0.01, cacheWrite: 0, total: 0.10 },
+  };
+  const sessionEntries = [{ type: "message", message: { role: "assistant", usage: parentUsage } }];
+  const harness = createHarness({
+    sessionEntries,
+    dependencies: {
+      spawnProcess() { return child; },
+      piInvocation: { command: "pi", args: [] },
+    },
+  });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Explore" }],
+  }, harness.ctx);
+  const workerId = spawned.details.workers[0].id;
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+    role: "assistant",
+    content: [{ type: "text", text: "Working" }],
+    stopReason: "toolUse",
+    usage: {
+      input: 300,
+      output: 100,
+      cacheRead: 100,
+      cacheWrite: 0,
+      totalTokens: 500,
+      cost: { input: 0.02, output: 0.02, cacheRead: 0.01, cacheWrite: 0, total: 0.05 },
+    },
+  } })}\n`);
+
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [workerId] }, harness.ctx);
+  sessionEntries.push({ type: "message", message: { role: "toolResult", usage: read.usage } });
+  const board = renderWidget(harness.widgets.at(-1).content).join("\n");
+
+  assert.match(board, /SESSION 1\.5k.*\$0\.15/);
+  assert.doesNotMatch(board, /SESSION 2k|\$0\.20/);
+});
+
+test("the Pi widget keeps six Active Workers readable within seven lines at compact width", async () => {
+  const children = Array.from({ length: 6 }, () => fakeRpcProcess());
+  const queue = [...children];
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return queue.shift(); },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), { tasks: [
+    { role: "mechanical", task: "Mechanical" },
+    { role: "explorer", task: "Explore" },
+    { role: "implementer", task: "Implement" },
+    { role: "architect", task: "Architect" },
+    { role: "reviewer", task: "Review" },
+    { role: "planner", task: "Plan" },
+  ] }, harness.ctx);
+  const usage = {
+    input: 10_000,
+    output: 2_000,
+    cacheRead: 300,
+    cacheWrite: 40,
+    totalTokens: 12_340,
+    cost: { input: 0.02, output: 0.02, cacheRead: 0.006, cacheWrite: 0.001, total: 0.047 },
+  };
+  for (const child of children) {
+    child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+      role: "assistant",
+      content: [{ type: "text", text: "Working" }],
+      stopReason: "toolUse",
+      usage,
+    } })}\n`);
+  }
+
+  const lines = renderWidget(harness.widgets.at(-1).content, 24);
+  assert.equal(lines.length, 7);
+  assert.ok(lines.every((line) => line.length <= 24), lines.join("\n"));
+  assert.match(lines[0], /M-STD 6\/6/);
+  assert.match(lines.join("\n"), /W1 MEC LUN/);
+  assert.match(lines.join("\n"), /W2 EXP LUN/);
+  assert.match(lines.join("\n"), /W3 IMP LUN/);
+  assert.match(lines.join("\n"), /W4 ARC SOL/);
+  assert.match(lines.join("\n"), /W5 REV SOL/);
+  assert.match(lines.join("\n"), /W6 PLN TER/);
+  assert.match(lines.join("\n"), /12k \$\.047/);
+});
+
+test("the Pi widget keeps only Session Usage after completion while diagnostics freeze completion time", async () => {
   const child = fakeRpcProcess();
   let timestamp = 1_000;
   const harness = createHarness({ dependencies: {
@@ -477,9 +712,8 @@ test("the Pi widget aggregates completed workers and freezes their elapsed durat
   timestamp = 100_000;
   const board = renderWidget(visible.content).join("\n");
 
-  assert.match(board, /0 active/);
-  assert.match(board, /1 done/);
-  assert.doesNotMatch(board, /Inspect worker retention/);
+  assert.equal(board, "MINIONS STD 0/6 │ SESSION 0 · $0.00");
+  assert.doesNotMatch(board, /explorer|Inspect worker retention/);
   const snapshot = harness.appendedEntries.at(-1).data.workers[0];
   assert.equal(snapshot.completedAt, 6_000);
 });
@@ -508,7 +742,7 @@ test("an explicit worker deadline blocks and aborts a worker that does not settl
   assert.deepEqual(JSON.parse(child.stdin.writes.at(-1)), { type: "abort" });
 });
 
-test("reload keeps the last worker board visible and marks active workers interrupted", async () => {
+test("reload preserves interrupted diagnostics but removes the Active Worker widget", async () => {
   const child = fakeRpcProcess();
   const first = createHarness({ dependencies: {
     spawnProcess() { return child; },
@@ -520,12 +754,43 @@ test("reload keeps the last worker board visible and marks active workers interr
   }, first.ctx);
   first.handlers.get("session_shutdown")({ reason: "reload" }, first.ctx);
 
+  assert.equal(first.widgets.at(-1).content, undefined);
+  const interruptedState = first.appendedEntries
+    .filter((entry) => entry.customType === "pi-minions-state")
+    .at(-1);
+  assert.equal(interruptedState.data.lifecycle, "interrupted");
+
   const resumed = createHarness({ sessionEntries: first.appendedEntries });
   resumed.handlers.get("session_start")({ reason: "reload" }, resumed.ctx);
 
-  const board = resumed.widgets.at(-1).lines.join("\n");
-  assert.match(board, /explorer/);
-  assert.match(board, /interrupted/);
+  assert.equal(resumed.widgets.length, 0);
+  assert.match(resumed.notifications.at(-1).message, /stopped 1 active Pi minions worker/);
+});
+
+test("settled workers leave the Active Worker view and emit one short aggregated notification", async () => {
+  const children = [fakeRpcProcess(), fakeRpcProcess()];
+  const queue = [...children];
+  const scheduled = [];
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return queue.shift(); },
+    piInvocation: { command: "pi", args: [] },
+    setTimeout(callback) { scheduled.push(callback); return scheduled.length; },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), { tasks: [
+    { role: "explorer", task: "Explore A" },
+    { role: "reviewer", task: "Review B" },
+  ] }, harness.ctx);
+
+  children[0].stdout.emit("data", `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "A done" }], stopReason: "stop" } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+  children[1].stdout.emit("data", `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "B failed" }], stopReason: "error" } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+  scheduled[0]();
+
+  assert.deepEqual(harness.widgets.at(-1).lines, ["MINIONS STD 0/6 │ SESSION 0 · $0.00"]);
+  assert.deepEqual(harness.notifications.at(-1), {
+    message: "W1 completed · W2 blocked",
+    level: "warning",
+  });
 });
 
 test("settled workers produce one aggregated notification and are readable", async () => {

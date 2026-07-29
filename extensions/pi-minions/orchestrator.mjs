@@ -114,25 +114,6 @@ function defaultPiInvocation() {
   return { command: "pi", args: [] };
 }
 
-function taskLabel(task) {
-  const lines = String(task ?? "").split(/\r?\n/).map((line) => line.trim());
-  const taskId = lines.find((line) => /^Task ID:/i.test(line))?.replace(/^Task ID:\s*/i, "");
-  const preferred = ["Question", "Changes", "Goal", "Objective", "Request", "Spec"];
-  let summary;
-  for (const label of preferred) {
-    const match = lines.find((line) => new RegExp(`^${label}:\\s*`, "i").test(line));
-    if (match) {
-      summary = match.replace(new RegExp(`^${label}:\\s*`, "i"), "");
-      if (summary) break;
-    }
-  }
-  if (!summary) {
-    const metadata = /^(Task ID|Role|Working directory|Branch|Base ref|Discipline|Fixed point|Issue):/i;
-    summary = lines.find((line) => line && !metadata.test(line));
-  }
-  return { taskId, summary: summary || "Task details unavailable" };
-}
-
 function truncateLabel(text, width) {
   if (width <= 0) return "";
   if (text.length <= width) return text;
@@ -145,6 +126,87 @@ function formatElapsed(seconds) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return remainder ? `${minutes}m${String(remainder).padStart(2, "0")}s` : `${minutes}m`;
+}
+
+function formatTokenCount(tokens) {
+  if (tokens === undefined) return "—";
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 1 : 2).replace(/\.0+$/, "")}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 100_000 ? 0 : 1).replace(/\.0$/, "")}k`;
+  return String(tokens);
+}
+
+function formatCost(cost) {
+  if (cost === undefined) return "—";
+  if (cost === 0) return "$0.00";
+  if (cost < 0.01) {
+    const precise = cost.toPrecision(3);
+    return `$${precise.includes("e") ? precise : precise.replace(/0+$/, "").replace(/\.$/, "")}`;
+  }
+  if (cost < 0.1) return `$${cost.toFixed(3)}`;
+  return `$${cost.toFixed(2)}`;
+}
+
+function formatCompactTokenCount(tokens) {
+  if (tokens === undefined) return "—";
+  if (tokens >= 1_000_000_000_000) return `${Math.round(tokens / 1_000_000_000_000)}T`;
+  if (tokens >= 1_000_000_000) return `${Math.round(tokens / 1_000_000_000)}B`;
+  if (tokens >= 1_000_000) return `${Math.round(tokens / 1_000_000)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
+}
+
+function formatCompactCost(cost) {
+  if (cost === undefined) return "—";
+  if (cost === 0) return "$0";
+  if (cost >= 1_000_000) return `$${Math.round(cost / 1_000_000)}M`;
+  if (cost >= 1_000) return `$${Math.round(cost / 1_000)}k`;
+  if (cost >= 100) return `$${Math.round(cost)}`;
+  if (cost >= 10) return `$${cost.toFixed(1)}`;
+  if (cost >= 0.1) return `$${cost.toFixed(2)}`;
+  if (cost < 0.0001) return `$${cost.toExponential(0)}`;
+  return formatCost(cost).replace(/^\$0\./, "$.");
+}
+
+function shortModelName(model) {
+  return model.replace(/^gpt-\d+(?:\.\d+)*-/, "");
+}
+
+const ROLE_ALIASES = {
+  mechanical: "MEC",
+  explorer: "EXP",
+  implementer: "IMP",
+  architect: "ARC",
+  reviewer: "REV",
+  planner: "PLN",
+};
+
+const THINKING_ALIASES = {
+  off: "OFF",
+  minimal: "MIN",
+  low: "L",
+  medium: "M",
+  high: "H",
+  xhigh: "XH",
+  max: "MAX",
+};
+
+function modelAlias(model) {
+  const name = shortModelName(model).toLowerCase();
+  if (name.includes("luna")) return "LUN";
+  if (name.includes("sol")) return "SOL";
+  if (name.includes("terra")) return "TER";
+  if (name.includes("grok")) return "GRK";
+  return name.replace(/[^a-z0-9]/g, "").slice(0, 3).toUpperCase() || "???";
+}
+
+function variantAlias(variant) {
+  return variant === "standard" ? "STD" : String(variant).toUpperCase();
+}
+
+function sessionEntryUsage(entry) {
+  if (entry?.type === "message") return entry.message?.usage;
+  if (entry?.type === "compaction" || entry?.type === "branch_summary") return entry.usage;
+  return undefined;
 }
 
 function combineUsage(...items) {
@@ -214,10 +276,13 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   const piInvocation = dependencies.piInvocation ?? defaultPiInvocation();
   const schedule = dependencies.setTimeout ?? setTimeout;
   const cancelSchedule = dependencies.clearTimeout ?? clearTimeout;
+  const scheduleWidget = dependencies.setWidgetTimeout ?? setTimeout;
+  const cancelWidgetSchedule = dependencies.clearWidgetTimeout ?? clearTimeout;
   const now = dependencies.now ?? Date.now;
   let run;
   let changingModel = false;
   let completionTimer;
+  let widgetTimer;
   const pendingCompletions = new Set();
 
   function workerSnapshot(worker, status = worker.status) {
@@ -234,6 +299,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       startedAt: worker.startedAt,
       completedAt: worker.completedAt,
       timeoutSeconds: worker.timeoutSeconds,
+      displayNumber: worker.displayNumber,
+      usage: worker.usage,
+      pendingUsage: worker.pendingUsage,
       currentTool: worker.currentTool,
       error: worker.error,
     };
@@ -259,43 +327,46 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     ctx.ui.setWidget("pi-minions-workers", (_tui, theme) => ({
       render(width) {
         const workers = snapshot.workers ?? [];
-        const counts = workers.reduce((result, worker) => {
-          result[worker.status] = (result[worker.status] ?? 0) + 1;
-          return result;
-        }, {});
-        const active = counts["in-flight"] ?? 0;
-        const done = counts.done ?? 0;
-        const statusParts = [theme.fg(active ? "success" : "muted", `${active} active`)];
-        if (done) statusParts.push(theme.fg("success", `${done} done`));
-        if (counts.blocked) statusParts.push(theme.fg("error", `${counts.blocked} blocked`));
-        if (counts.interrupted) statusParts.push(theme.fg("warning", `${counts.interrupted} interrupted`));
-        if (counts.stopped) statusParts.push(theme.fg("muted", `${counts.stopped} stopped`));
-        const lines = [
-          `${theme.fg("accent", theme.bold("Minions"))} ${theme.fg("dim", `· ${snapshot.provider} · ${snapshot.variant} ·`)} ${statusParts.join(theme.fg("dim", " · "))}`,
-        ];
-        const visibleWorkers = workers.filter((worker) => worker.status !== "done" && worker.status !== "stopped");
-        if (workers.length === 0) lines.push(theme.fg("muted", "  no workers"));
-        for (const worker of visibleWorkers) {
-          const { taskId, summary } = taskLabel(worker.task);
-          const visual = worker.status === "in-flight"
-            ? { symbol: "●", color: "success" }
-            : worker.status === "blocked"
-              ? { symbol: "!", color: "error" }
-              : { symbol: "◆", color: "warning" };
-          const identity = `${taskId ? `${taskId} · ` : ""}${worker.role}`;
-          const prefix = `  ${visual.symbol} ${identity} · `;
-          const shortSummary = truncateLabel(summary, Math.max(12, width - prefix.length));
-          lines.push(`${theme.fg(visual.color, `  ${visual.symbol}`)} ${theme.fg("accent", identity)}${theme.fg("dim", " · ")}${theme.fg("text", shortSummary)}`);
+        const activeWorkers = workers.filter((worker) => worker.status === "in-flight");
+        const branchUsage = (ctx.sessionManager.getBranch?.() ?? []).map(sessionEntryUsage);
+        const sessionUsage = combineUsage(...branchUsage, ...workers.map((worker) => worker.pendingUsage));
+        const sessionTokens = sessionUsage?.totalTokens ?? 0;
+        const sessionCost = sessionUsage?.cost?.total ?? 0;
+        if (width < 24) return [theme.fg("warning", truncateLabel("MINIONS: widen terminal", width))];
 
-          const elapsedEnd = worker.completedAt ?? now();
-          const elapsedSeconds = Math.max(0, Math.floor((elapsedEnd - worker.startedAt) / 1000));
-          const activity = worker.currentTool
-            ? theme.fg("accent", worker.currentTool)
-            : worker.error
-              ? theme.fg("error", truncateLabel(worker.error, Math.max(12, width - 4)))
-              : theme.fg("muted", worker.status);
-          const route = worker.routeOverride ? ` · override: ${worker.routeOverride}` : "";
-          lines.push(`    ${activity}${theme.fg("dim", ` · ${worker.model}:${worker.thinking}${route} · ${formatElapsed(elapsedSeconds)} · ${worker.id.slice(0, 8)}`)}`);
+        const variant = variantAlias(snapshot.variant);
+        const compact = width < 48;
+        const wide = width >= 80;
+        const lines = compact
+          ? [`${theme.fg("accent", theme.bold(`M-${variant} ${activeWorkers.length}/6`))} ${theme.fg("text", `Σ${formatCompactTokenCount(sessionTokens)} ${formatCompactCost(sessionCost)}`)}`]
+          : [`${theme.fg("accent", theme.bold(`MINIONS ${variant} ${activeWorkers.length}/6`))}${theme.fg("dim", " │ ")}${theme.fg("text", `SESSION ${formatTokenCount(sessionTokens)} · ${formatCost(sessionCost)}`)}`];
+
+        for (const worker of activeWorkers) {
+          const tokens = formatTokenCount(worker.usage?.totalTokens);
+          const cost = formatCost(worker.usage?.cost?.total);
+          if (compact) {
+            lines.push(`${theme.fg("success", "●")}${theme.fg("accent", `W${worker.displayNumber} ${ROLE_ALIASES[worker.role] ?? "???"} ${modelAlias(worker.model)}`)} ${theme.fg("text", `${formatCompactTokenCount(worker.usage?.totalTokens)} ${formatCompactCost(worker.usage?.cost?.total)}`)}`);
+            continue;
+          }
+
+          const role = wide ? worker.role : (ROLE_ALIASES[worker.role] ?? worker.role);
+          const model = truncateLabel(shortModelName(worker.model), wide ? 18 : 10);
+          const thinking = wide ? worker.thinking : (THINKING_ALIASES[worker.thinking] ?? worker.thinking);
+          const parts = [
+            theme.fg("success", "●"),
+            theme.fg("accent", `W${worker.displayNumber} ${role}`),
+            theme.fg("dim", "│"),
+            theme.fg("text", `${model}:${thinking}`),
+            theme.fg("dim", "│"),
+            theme.fg("text", tokens),
+            theme.fg("dim", "│"),
+            theme.fg("text", cost),
+          ];
+          if (wide) {
+            const elapsedSeconds = Math.max(0, Math.floor((now() - worker.startedAt) / 1000));
+            parts.push(theme.fg("dim", "│"), theme.fg("muted", formatElapsed(elapsedSeconds)));
+          }
+          lines.push(parts.join(" "));
         }
         return lines;
       },
@@ -304,15 +375,31 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   }
 
   function updateWorkerWidget(ctx) {
-    if (!run) return renderWorkerWidget(ctx, undefined);
+    if (!run) {
+      if (widgetTimer !== undefined) cancelWidgetSchedule(widgetTimer);
+      widgetTimer = undefined;
+      return renderWorkerWidget(ctx, undefined);
+    }
     renderWorkerWidget(ctx, {
       provider: run.provider,
       variant: run.variant,
       workers: [...run.workers.values()].map((worker) => workerSnapshot(worker)),
     });
+    const hasActiveWorkers = [...run.workers.values()].some((worker) => worker.status === "in-flight");
+    if (!hasActiveWorkers) {
+      if (widgetTimer !== undefined) cancelWidgetSchedule(widgetTimer);
+      widgetTimer = undefined;
+      return;
+    }
+    if (widgetTimer !== undefined) return;
+    widgetTimer = scheduleWidget(() => {
+      widgetTimer = undefined;
+      if (run) updateWorkerWidget(ctx);
+    }, 1000);
+    widgetTimer?.unref?.();
   }
 
-  function notifyCompletion(worker) {
+  function notifyCompletion(worker, ctx) {
     pendingCompletions.add(worker.id);
     if (completionTimer) return;
     completionTimer = schedule(() => {
@@ -320,6 +407,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const ids = [...pendingCompletions];
       pendingCompletions.clear();
       if (!run || ids.length === 0) return;
+      const completedWorkers = ids.map((id) => run.workers.get(id)).filter(Boolean);
+      const summary = completedWorkers
+        .map((item) => `W${item.displayNumber} ${item.status === "done" ? "completed" : item.status}`)
+        .join(" · ");
+      ctx.ui?.notify?.(summary, completedWorkers.some((item) => item.status === "blocked") ? "warning" : "info");
       pi.sendMessage({
         customType: "pi-minions-completion",
         content: `Worker completion notification: ${ids.join(", ")}. Read each worker, update the board, and dispatch newly unblocked work.`,
@@ -365,6 +457,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       model: modelId,
       thinking,
       routeOverride: spec.routeOverride,
+      displayNumber: run.nextWorkerNumber++,
       status: "in-flight",
       output: "",
       stderr: "",
@@ -385,7 +478,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (error) worker.error = error;
       persistRun();
       updateWorkerWidget(ctx);
-      if (status !== "stopped") notifyCompletion(worker);
+      if (status !== "stopped") notifyCompletion(worker, ctx);
     };
     if (spec.timeoutSeconds) {
       worker.timeoutTimer = schedule(() => {
@@ -406,6 +499,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         worker.usage = combineUsage(worker.usage, event.message.usage);
         worker.pendingUsage = combineUsage(worker.pendingUsage, event.message.usage);
         worker.stopReason = event.message.stopReason;
+        updateWorkerWidget(ctx);
       }
       if (event.type === "tool_execution_start") {
         worker.currentTool = event.toolName;
@@ -483,6 +577,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         originalModel,
         originalThinking,
         workers: new Map(),
+        nextWorkerNumber: 1,
       };
       ctx.ui?.setStatus?.("pi-minions", `${provider} · ${variant}`);
       persistRun();
@@ -521,7 +616,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     label: "Read Minions",
     description: "Read status and final output from managed Pi workers.",
     parameters: schemas.read ?? {},
-    async execute(_id, params) {
+    async execute(_id, params, _signal, _onUpdate, ctx) {
       if (!run) throw new Error("No orchestration run is active.");
       const ids = params.workerIds?.length ? params.workerIds : [...run.workers.keys()];
       const selectedWorkers = ids.map((id) => {
@@ -540,6 +635,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       });
       const usage = combineUsage(...selectedWorkers.map((worker) => worker.pendingUsage));
       for (const worker of selectedWorkers) worker.pendingUsage = undefined;
+      updateWorkerWidget(ctx);
       const result = textResult(truncateForContext(summaries.join("\n\n")), { workers });
       if (usage) result.usage = usage;
       return result;
@@ -596,6 +692,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const active = [...run.workers.values()].filter((worker) => worker.status === "in-flight");
       if (active.length > 0) throw new Error(`Cannot close with ${active.length} in-flight worker(s).`);
       const closing = run;
+      const pendingUsage = combineUsage(...[...closing.workers.values()].map((worker) => worker.pendingUsage));
       persistRun("closed");
       run = undefined;
       if (closing.originalModel) {
@@ -615,7 +712,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       }
       ctx.ui?.setStatus?.("pi-minions", undefined);
       updateWorkerWidget(ctx);
-      return textResult(`Closed orchestration ${closing.id} and restored the original model.`, { runId: closing.id });
+      const result = textResult(`Closed orchestration ${closing.id} and restored the original model.`, { runId: closing.id });
+      if (pendingUsage) result.usage = pendingUsage;
+      return result;
     },
   });
 
@@ -658,14 +757,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
 
   pi.on("session_start", (_event, ctx) => {
     let interrupted;
-    let lastState;
     for (const entry of ctx.sessionManager.getEntries?.() ?? []) {
       if (entry.type !== "custom") continue;
-      if (entry.customType === "pi-minions-state") lastState = entry.data;
       if (entry.customType === "pi-minions-reload-interrupted") interrupted = entry.data;
       if (entry.customType === "pi-minions-reload-notified") interrupted = undefined;
     }
-    if (lastState?.lifecycle === "interrupted") renderWorkerWidget(ctx, lastState);
     if (!interrupted) return;
     ctx.ui?.notify?.(`Reload stopped ${interrupted.workerCount} active Pi minions worker(s).`, "warning");
     pi.appendEntry("pi-minions-reload-notified", { interruptedAt: interrupted.timestamp });
@@ -683,7 +779,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return { cancel: true };
   });
 
-  pi.on("session_shutdown", (event) => {
+  pi.on("session_shutdown", (event, ctx) => {
     if (!run) return;
     const activeWorkers = [...run.workers.values()].filter((worker) => worker.status === "in-flight");
     if (event.reason === "reload" && activeWorkers.length > 0) {
@@ -702,5 +798,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
     persistRun(event.reason === "reload" ? "interrupted" : "closed", event.reason === "reload" ? "interrupted" : undefined);
     run = undefined;
+    if (widgetTimer !== undefined) cancelWidgetSchedule(widgetTimer);
+    widgetTimer = undefined;
+    renderWorkerWidget(ctx, undefined);
   });
 }
