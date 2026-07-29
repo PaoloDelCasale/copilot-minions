@@ -1,19 +1,19 @@
 # Model rationale
 
-The orchestrator uses one GPT-5.6 family and the same model IDs on every platform.
-Tracer-bullet decomposition makes Luna viable for bounded daily work; Sol is reserved
-for complex implementation, independent review, and escalation; Terra handles
-structured planning.
+Routing differs by provider. OpenAI Codex retains Luna for bounded daily work, Sol
+for complex implementation, review, and escalation, and Terra for structured
+planning. GitHub Copilot uses Grok 4.5 at high reasoning for every route that would
+otherwise use Luna; its Sol and Terra decisions remain unchanged.
 
-| Role | Choice | Rationale |
-|------|--------|-----------|
-| Frontier | Sol medium | Strong decomposition without paying high effort every turn |
-| Mechanical | Luna low | Fast, low-cost command and commit work |
-| Explorer | Luna high | Efficient read-heavy discovery |
-| Implementer | Luna high/xhigh | Cost-effective for tightly specified slices |
-| Architect | Sol medium | Better fit for ambiguous cross-cutting work |
-| Reviewer | Sol low | Independent judgment over Luna implementation |
-| Planner | Terra high | Strong structured synthesis at low planning volume |
+| Route kind | OpenAI Codex | GitHub Copilot | Rationale |
+|------------|--------------|----------------|-----------|
+| Frontier | Sol medium | Sol medium | Strong decomposition without high effort every turn |
+| Mechanical | Luna low | Grok high | Provider-specific execution route |
+| Explorer | Luna medium/high | Grok high | Read-heavy discovery |
+| Implementer | Luna high/xhigh | Grok high | Tightly specified slices |
+| Architect (standard) | Sol medium | Sol medium | Ambiguous cross-cutting work |
+| Reviewer | Sol low | Sol low | Independent judgment |
+| Planner (standard) | Terra high | Terra high | Structured synthesis at low volume |
 
-These are routing decisions, not benchmark claims. Codex installation must fail
-before writing files when its model catalog cannot resolve all required IDs.
+These are routing decisions, not benchmark claims. Required-model checks resolve all
+IDs against the selected provider's own catalog and never fall back across providers.

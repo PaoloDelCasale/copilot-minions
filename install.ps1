@@ -120,6 +120,10 @@ function New-SkillStage(
     }
     Copy-Item -Force (Join-Path $overlay 'SKILL.md') $stage
     Copy-Item -Force (Join-Path $overlay 'platform.md') $stage
+    $platformModels = Join-Path $overlay 'models.md'
+    if (Test-Path -LiteralPath $platformModels -PathType Leaf) {
+        Copy-Item -Force $platformModels (Join-Path $stage 'models.md')
+    }
     if (Test-Path -LiteralPath (Join-Path $root 'scripts')) {
         Copy-Item -Recurse -Force (Join-Path $root 'scripts') (Join-Path $stage 'scripts')
     }

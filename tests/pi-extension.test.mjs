@@ -13,7 +13,7 @@ function renderWidget(content, width = 120) {
   return content({ requestRender() {} }, plainTheme).render(width);
 }
 
-function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", dependencies = {}, missingModels = [], frontierBusy = false, sessionEntries = [], setModelResults = [] } = {}) {
+function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", dependencies = {}, missingModels = [], modelCatalogs, frontierBusy = false, sessionEntries = [], setModelResults = [] } = {}) {
   const tools = new Map();
   const handlers = new Map();
   const modelChanges = [];
@@ -34,9 +34,13 @@ function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", depende
     },
     appendEntry(customType, data) { appendedEntries.push({ type: "custom", customType, data }); },
   };
-  const models = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
-    .filter((id) => !missingModels.includes(id))
-    .map((id) => ({ provider, id }));
+  const defaultCatalog = provider === "github-copilot"
+    ? ["gpt-5.6-sol", "gpt-5.6-terra", "grok-4.5"]
+    : ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+  const catalogs = modelCatalogs ?? { [provider]: defaultCatalog };
+  const models = Object.entries(catalogs).flatMap(([catalogProvider, ids]) => ids
+    .filter((id) => catalogProvider !== provider || !missingModels.includes(id))
+    .map((id) => ({ provider: catalogProvider, id })));
   const ctx = {
     cwd: "/repo",
     model: { provider, id: modelId },
@@ -96,13 +100,28 @@ test("start rejects providers outside the supported Provider Affinity boundary",
   assert.equal(harness.modelChanges.length, 0);
 });
 
-test("start fails preflight instead of changing the Role Routing", async () => {
-  const harness = createHarness({ missingModels: ["gpt-5.6-terra"] });
+test("required-model preflight uses the selected provider catalog without fallback", async () => {
+  const cases = [
+    { provider: "openai-codex", missing: "gpt-5.6-luna" },
+    { provider: "github-copilot", missing: "grok-4.5" },
+  ];
 
-  await assert.rejects(
-    execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx),
-    /missing required model\(s\): gpt-5.6-terra/,
-  );
+  for (const { provider, missing } of cases) {
+    const otherProvider = provider === "openai-codex" ? "github-copilot" : "openai-codex";
+    const harness = createHarness({
+      provider,
+      modelCatalogs: {
+        [provider]: ["gpt-5.6-sol", "gpt-5.6-terra"],
+        [otherProvider]: ["gpt-5.6-sol", "gpt-5.6-terra", missing],
+      },
+    });
+
+    await assert.rejects(
+      execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx),
+      new RegExp(`Provider ${provider} is missing required model\\(s\\): ${missing.replace(".", "\\.")}`),
+    );
+    assert.equal(harness.modelChanges.length, 0);
+  }
 });
 
 test("spawn starts an ephemeral trusted RPC worker on the role route", async () => {
@@ -131,6 +150,32 @@ test("spawn starts an ephemeral trusted RPC worker on the role route", async () 
   assert.equal(spawns[0].options.cwd, "/repo/.worktrees/t1");
   assert.deepEqual(JSON.parse(process.stdin.writes[0]), { type: "prompt", message: "Implement T1" });
   assert.match(result.content[0].text, /implementer/);
+});
+
+test("Copilot standard and low-budget routes replace Luna with Grok high only", async () => {
+  const cases = [
+    { variant: "standard", role: "mechanical", model: "grok-4.5", thinking: "high" },
+    { variant: "standard", role: "architect", model: "gpt-5.6-sol", thinking: "medium" },
+    { variant: "standard", role: "planner", model: "gpt-5.6-terra", thinking: "high" },
+    { variant: "lb", role: "architect", model: "grok-4.5", thinking: "high" },
+    { variant: "lb", role: "reviewer", model: "gpt-5.6-sol", thinking: "low" },
+  ];
+
+  for (const { variant, role, model, thinking } of cases) {
+    const spawns = [];
+    const harness = createHarness({ provider: "github-copilot", dependencies: {
+      spawnProcess(command, args, options) { spawns.push({ command, args, options }); return fakeRpcProcess(); },
+      piInvocation: { command: "pi", args: [] },
+    } });
+    await execute(harness.tools.get("minions_start"), { variant }, harness.ctx);
+    await execute(harness.tools.get("minions_spawn"), {
+      tasks: [{ role, task: `Run ${role}` }],
+    }, harness.ctx);
+
+    assert.ok(spawns[0].args.includes(`github-copilot/${model}`));
+    assert.equal(spawns[0].args[spawns[0].args.indexOf("--thinking") + 1], thinking);
+    assert.ok(!spawns[0].args.some((arg) => arg.includes("gpt-5.6-luna")));
+  }
 });
 
 test("spawn tells the frontier to end its turn and wait for completion notifications", async () => {
@@ -210,6 +255,30 @@ test("escalation routes follow the standard and low-budget ladders", async () =>
   }
 });
 
+test("Copilot low-budget Luna overrides become Grok high while named Sol escalations stay unchanged", async () => {
+  const cases = [
+    { routeOverride: "mechanical-judgment", role: "mechanical", model: "grok-4.5", thinking: "high" },
+    { routeOverride: "escalate-entry", role: "implementer", model: "grok-4.5", thinking: "high" },
+    { routeOverride: "escalate-sol-low", role: "implementer", model: "gpt-5.6-sol", thinking: "low" },
+    { routeOverride: "escalate-sol-medium", role: "implementer", model: "gpt-5.6-sol", thinking: "medium" },
+  ];
+
+  for (const { routeOverride, role, model, thinking } of cases) {
+    const spawns = [];
+    const harness = createHarness({ provider: "github-copilot", dependencies: {
+      spawnProcess(command, args, options) { spawns.push({ command, args, options }); return fakeRpcProcess(); },
+      piInvocation: { command: "pi", args: [] },
+    } });
+    await execute(harness.tools.get("minions_start"), { variant: "lb" }, harness.ctx);
+    await execute(harness.tools.get("minions_spawn"), {
+      tasks: [{ role, routeOverride, task: "Retry" }],
+    }, harness.ctx);
+
+    assert.ok(spawns[0].args.includes(`github-copilot/${model}`));
+    assert.equal(spawns[0].args[spawns[0].args.indexOf("--thinking") + 1], thinking);
+  }
+});
+
 test("worker steering, stopping, and close are exposed through managed tools", async () => {
   const child = fakeRpcProcess();
   const harness = createHarness({ dependencies: {
@@ -233,6 +302,16 @@ test("worker steering, stopping, and close are exposed through managed tools", a
   ]);
   assert.match(closed.content[0].text, /closed/i);
   assert.deepEqual(harness.modelChanges.at(-1), { provider: "openai-codex", id: "gpt-5.4" });
+  assert.equal(harness.thinkingChanges.at(-1), "high");
+});
+
+test("close restores the original Copilot model and thinking level", async () => {
+  const harness = createHarness({ provider: "github-copilot", modelId: "gpt-4.1" });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+
+  await execute(harness.tools.get("minions_close"), {}, harness.ctx);
+
+  assert.deepEqual(harness.modelChanges.at(-1), { provider: "github-copilot", id: "gpt-4.1" });
   assert.equal(harness.thinkingChanges.at(-1), "high");
 });
 

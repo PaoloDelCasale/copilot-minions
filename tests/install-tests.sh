@@ -44,7 +44,7 @@ if [[ "${1:-}" == "--list-models" ]]; then
     'openai-codex gpt-5.6-luna' \
     'github-copilot gpt-5.6-sol' \
     'github-copilot gpt-5.6-terra' \
-    'github-copilot gpt-5.6-luna'
+    'github-copilot grok-4.5'
 fi
 EOF
 
@@ -94,6 +94,10 @@ grep -Fq 'Triage: 8/8' "${PI_SKILL}/control.md"
 [[ -f "${PI_EXTENSION}/index.ts" ]]
 [[ -f "${COPILOT_SKILL}/platform.md" ]]
 [[ -f "${CODEX_SKILL}/platform.md" ]]
+grep -Eq 'mechanical.*grok-4\.5.*high' "${COPILOT_SKILL}/models.md"
+grep -Eq 'mechanical.*gpt-5\.6-luna.*low' "${CODEX_SKILL}/models.md"
+grep -Fq '## `openai-codex`' "${PI_SKILL}/models.md"
+grep -Fq '## `github-copilot`' "${PI_SKILL}/models.md"
 [[ ! -e "${CODEX_SKILL}/custom-agents" ]]
 [[ "$(count_files "${AGENTS}"/codex-minions-*.toml)" -eq 6 ]]
 [[ -f "${AGENTS}/.codex-minions-manifest" ]]
@@ -116,6 +120,9 @@ bash "${ROOT}/install.sh" --platform all --variant all >/dev/null
 [[ -f "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/SKILL.md" ]]
 [[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/SKILL.md" ]]
 [[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/control.md" ]]
+grep -Eq 'architect.*grok-4\.5.*high' "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/models.md"
+grep -Fq 'gpt-5.6-luna:xhigh' "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/models.md"
+grep -Fq 'grok-4.5:high' "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/models.md"
 [[ "$(count_files "${AGENTS}"/codex-minions*.toml)" -eq 12 ]]
 [[ -f "${AGENTS}/.codex-minions-lb-manifest" ]]
 
