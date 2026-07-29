@@ -5,51 +5,81 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 const SUPPORTED_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
-const REQUIRED_MODELS = {
-  standard: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
-  lb: ["gpt-5.6-sol", "gpt-5.6-luna"],
-};
-
-const ROUTES = {
-  standard: {
-    mechanical: ["gpt-5.6-luna", "low"],
-    explorer: ["gpt-5.6-luna", "high"],
-    implementer: ["gpt-5.6-luna", "xhigh"],
-    architect: ["gpt-5.6-sol", "medium"],
-    reviewer: ["gpt-5.6-sol", "low"],
-    planner: ["gpt-5.6-terra", "high"],
+const SUPPORTED_VARIANTS = new Set(["standard", "lb"]);
+const PROVIDER_MATRICES = {
+  "openai-codex": {
+    standard: {
+      requiredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+      routes: {
+        mechanical: ["gpt-5.6-luna", "low"],
+        explorer: ["gpt-5.6-luna", "high"],
+        implementer: ["gpt-5.6-luna", "xhigh"],
+        architect: ["gpt-5.6-sol", "medium"],
+        reviewer: ["gpt-5.6-sol", "low"],
+        planner: ["gpt-5.6-terra", "high"],
+      },
+      overrides: {
+        "mechanical-judgment": ["gpt-5.6-sol", "low"],
+        "escalate-entry": ["gpt-5.6-sol", "medium"],
+        "escalate-sol-medium": ["gpt-5.6-sol", "medium"],
+        "escalate-sol-high": ["gpt-5.6-sol", "high"],
+        "escalate-sol-max": ["gpt-5.6-sol", "max"],
+      },
+    },
+    lb: {
+      requiredModels: ["gpt-5.6-sol", "gpt-5.6-luna"],
+      routes: {
+        mechanical: ["gpt-5.6-luna", "low"],
+        explorer: ["gpt-5.6-luna", "medium"],
+        implementer: ["gpt-5.6-luna", "high"],
+        architect: ["gpt-5.6-luna", "high"],
+        reviewer: ["gpt-5.6-sol", "low"],
+        planner: ["gpt-5.6-luna", "high"],
+      },
+      overrides: {
+        "mechanical-judgment": ["gpt-5.6-luna", "xhigh"],
+        "escalate-entry": ["gpt-5.6-luna", "xhigh"],
+        "escalate-sol-low": ["gpt-5.6-sol", "low"],
+        "escalate-sol-medium": ["gpt-5.6-sol", "medium"],
+      },
+    },
   },
-  lb: {
-    mechanical: ["gpt-5.6-luna", "low"],
-    explorer: ["gpt-5.6-luna", "medium"],
-    implementer: ["gpt-5.6-luna", "high"],
-    architect: ["gpt-5.6-luna", "high"],
-    reviewer: ["gpt-5.6-sol", "low"],
-    planner: ["gpt-5.6-luna", "high"],
-  },
-};
-
-const ROUTE_OVERRIDES = {
-  "mechanical-judgment": {
-    standard: ["gpt-5.6-sol", "low"],
-    lb: ["gpt-5.6-luna", "xhigh"],
-  },
-  "escalate-entry": {
-    standard: ["gpt-5.6-sol", "medium"],
-    lb: ["gpt-5.6-luna", "xhigh"],
-  },
-  "escalate-sol-low": {
-    lb: ["gpt-5.6-sol", "low"],
-  },
-  "escalate-sol-medium": {
-    standard: ["gpt-5.6-sol", "medium"],
-    lb: ["gpt-5.6-sol", "medium"],
-  },
-  "escalate-sol-high": {
-    standard: ["gpt-5.6-sol", "high"],
-  },
-  "escalate-sol-max": {
-    standard: ["gpt-5.6-sol", "max"],
+  "github-copilot": {
+    standard: {
+      requiredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "grok-4.5"],
+      routes: {
+        mechanical: ["grok-4.5", "high"],
+        explorer: ["grok-4.5", "high"],
+        implementer: ["grok-4.5", "high"],
+        architect: ["gpt-5.6-sol", "medium"],
+        reviewer: ["gpt-5.6-sol", "low"],
+        planner: ["gpt-5.6-terra", "high"],
+      },
+      overrides: {
+        "mechanical-judgment": ["gpt-5.6-sol", "low"],
+        "escalate-entry": ["gpt-5.6-sol", "medium"],
+        "escalate-sol-medium": ["gpt-5.6-sol", "medium"],
+        "escalate-sol-high": ["gpt-5.6-sol", "high"],
+        "escalate-sol-max": ["gpt-5.6-sol", "max"],
+      },
+    },
+    lb: {
+      requiredModels: ["gpt-5.6-sol", "grok-4.5"],
+      routes: {
+        mechanical: ["grok-4.5", "high"],
+        explorer: ["grok-4.5", "high"],
+        implementer: ["grok-4.5", "high"],
+        architect: ["grok-4.5", "high"],
+        reviewer: ["gpt-5.6-sol", "low"],
+        planner: ["grok-4.5", "high"],
+      },
+      overrides: {
+        "mechanical-judgment": ["grok-4.5", "high"],
+        "escalate-entry": ["grok-4.5", "high"],
+        "escalate-sol-low": ["gpt-5.6-sol", "low"],
+        "escalate-sol-medium": ["gpt-5.6-sol", "medium"],
+      },
+    },
   },
 };
 
@@ -300,9 +330,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   }
 
   function startWorker(spec, ctx) {
-    const roleRoute = ROUTES[run.variant][spec.role];
+    const matrix = PROVIDER_MATRICES[run.provider]?.[run.variant];
+    const roleRoute = matrix?.routes[spec.role];
     if (!roleRoute) throw new Error(`Unknown worker role: ${spec.role}`);
-    const route = spec.routeOverride ? ROUTE_OVERRIDES[spec.routeOverride]?.[run.variant] : roleRoute;
+    const route = spec.routeOverride ? matrix.overrides[spec.routeOverride] : roleRoute;
     if (!route) throw new Error(`Route override ${spec.routeOverride} is not available for ${run.variant}.`);
     const [defaultModel, thinking] = route;
     const modelId = spec.modelOverride ?? defaultModel;
@@ -420,7 +451,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     parameters: schemas.start ?? {},
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const variant = params.variant ?? "standard";
-      if (!(variant in ROUTES)) throw new Error(`Unknown minions variant: ${variant}`);
+      if (!SUPPORTED_VARIANTS.has(variant)) throw new Error(`Unknown minions variant: ${variant}`);
       if (!ctx.isProjectTrusted()) throw new Error("Pi minions requires a trusted project.");
       const provider = ctx.model?.provider;
       if (!SUPPORTED_PROVIDERS.has(provider)) {
@@ -436,7 +467,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
           variant: run.variant,
         });
       }
-      const missing = REQUIRED_MODELS[variant].filter((id) => !ctx.modelRegistry.find(provider, id));
+      const matrix = PROVIDER_MATRICES[provider][variant];
+      const missing = matrix.requiredModels.filter((id) => !ctx.modelRegistry.find(provider, id));
       if (missing.length > 0) throw new Error(`Provider ${provider} is missing required model(s): ${missing.join(", ")}`);
 
       const frontier = ctx.modelRegistry.find(provider, "gpt-5.6-sol");

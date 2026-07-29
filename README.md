@@ -70,11 +70,11 @@ Destinations:
 | Pi LB | `~/.pi/agent/skills/pi-minions-lb` | Shared extension in `~/.pi/agent/extensions/pi-minions` |
 
 Codex installation requires `codex` on `PATH` and runs `codex debug models` before
-writing files. Installation fails if `gpt-5.6-sol`, `gpt-5.6-terra`, or
-`gpt-5.6-luna` is unavailable. Pi installation requires `pi` on `PATH`; its provider
-catalog is validated at orchestration start because availability depends on the
-active authenticated provider. `all` preflights and stages every platform before
-replacing any installation.
+writing files. It requires Sol and Luna, plus Terra for the standard variant. Pi
+installation requires `pi` on `PATH`; its provider-specific catalog is validated at
+orchestration start because availability depends on the active authenticated
+provider. `all` preflights and stages every platform before replacing any
+installation.
 
 The six Codex agent files are namespaced and carry a managed marker. Pi skills and
 the shared extension also carry managed markers. The installer updates only managed
@@ -95,9 +95,9 @@ work, fixed point, verification contract, and worker/triage budgets. After eight
 worker results the frontier stops dispatching, drains in-flight work, posts a full
 handoff, and closes the run. Adjacent issue slices require a new explicit Goal.
 
-## Model stack
+## Standard model stacks
 
-Both platforms use the same routing:
+Routing is provider-specific. OpenAI Codex (native and Pi) keeps its existing routes:
 
 | Role | Model | Reasoning |
 |------|-------|-----------|
@@ -109,15 +109,27 @@ Both platforms use the same routing:
 | Reviewer | `gpt-5.6-sol` | low |
 | Planner | `gpt-5.6-terra` | high |
 
-See `skills/core/models.md` and `skills/core/model-rationale.md`.
+GitHub Copilot (native and Pi) uses Grok high wherever the old route used Luna;
+Sol and Terra routes stay unchanged:
+
+| Role | Model | Reasoning |
+|------|-------|-----------|
+| Frontier | `gpt-5.6-sol` | medium |
+| Mechanical / explorer / implementer | `grok-4.5` | high |
+| Architect | `gpt-5.6-sol` | medium |
+| Reviewer | `gpt-5.6-sol` | low |
+| Planner | `gpt-5.6-terra` | high |
+
+See each platform overlay's `models.md` and `skills/core/model-rationale.md`.
 
 ### Pi provider affinity
 
 Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
-`<provider>/gpt-5.6-sol:medium`; workers keep the existing role routing while every
-model is qualified with that same provider. Missing required models fail preflight;
-there is no cross-provider or availability fallback. Closing the run restores the
+`<provider>/gpt-5.6-sol:medium`; workers use that provider's matrix while every model
+is qualified with the same provider. Required-model preflight and route lookup are
+provider-specific. Missing models fail preflight; there is no cross-provider or
+availability fallback. Closing the run restores the
 parent's original model and thinking level.
 
 Pi renders a live worker widget above the editor with role, status, routed model,
@@ -135,10 +147,22 @@ preserving the existing minions flow:
 
 | Role | Model | Reasoning |
 |------|-------|-----------|
+OpenAI Codex (native and Pi):
+
+| Role | Model | Reasoning |
+|------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
 | Mechanical | `gpt-5.6-luna` | low |
 | Explorer | `gpt-5.6-luna` | medium |
 | Implementer / architect / planner | `gpt-5.6-luna` | high |
+| Reviewer | `gpt-5.6-sol` | low |
+
+GitHub Copilot (native and Pi):
+
+| Role | Model | Reasoning |
+|------|-------|-----------|
+| Frontier | `gpt-5.6-sol` | medium |
+| Mechanical / explorer / implementer / architect / planner | `grok-4.5` | high |
 | Reviewer | `gpt-5.6-sol` | low |
 
 Unlike the source configuration, LB does not add a separate validator or make review

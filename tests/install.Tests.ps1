@@ -52,7 +52,7 @@ if "%1"=="--list-models" (
   echo openai-codex gpt-5.6-luna
   echo github-copilot gpt-5.6-sol
   echo github-copilot gpt-5.6-terra
-  echo github-copilot gpt-5.6-luna
+  echo github-copilot grok-4.5
 )
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $bin 'pi.cmd')
@@ -88,6 +88,11 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'
     Assert-True (Test-Path (Join-Path $copilotSkill 'platform.md')) 'Copilot contains adapter'
     Assert-True (Test-Path (Join-Path $codexSkill 'platform.md')) 'Codex contains adapter'
+    Assert-True ((Get-Content (Join-Path $copilotSkill 'models.md') -Raw) -match 'mechanical.*grok-4\.5.*high') 'Copilot gets its provider matrix'
+    Assert-True ((Get-Content (Join-Path $codexSkill 'models.md') -Raw) -match 'mechanical.*gpt-5\.6-luna.*low') 'Codex keeps its provider matrix'
+    $piModels = Get-Content (Join-Path $piSkill 'models.md') -Raw
+    Assert-True ($piModels.Contains('## `openai-codex`')) 'Pi documents the Codex matrix'
+    Assert-True ($piModels.Contains('## `github-copilot`')) 'Pi documents the Copilot matrix'
     Assert-True (-not (Test-Path (Join-Path $codexSkill 'custom-agents'))) 'Agent sources are not copied into the skill'
 
     $agentDirectory = Join-Path $testHome '.codex\agents'
@@ -117,6 +122,11 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $testHome '.copilot\skills\copilot-minions-lb')) 'LB Copilot skill is installed'
     Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb')) 'LB Pi skill is installed'
     Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb\control.md')) 'LB Pi contains control gate'
+    $copilotLbModels = Get-Content (Join-Path $testHome '.copilot\skills\copilot-minions-lb\models.md') -Raw
+    Assert-True ($copilotLbModels -match 'architect.*grok-4\.5.*high') 'LB Copilot gets Grok high routes'
+    $piLbModels = Get-Content (Join-Path $testHome '.pi\agent\skills\pi-minions-lb\models.md') -Raw
+    Assert-True ($piLbModels.Contains('gpt-5.6-luna:xhigh')) 'LB Pi documents Codex Luna overrides'
+    Assert-True ($piLbModels.Contains('grok-4.5:high')) 'LB Pi documents Copilot Grok overrides'
     Assert-True (@(Get-ChildItem -LiteralPath $agentDirectory -Filter 'codex-minions*.toml').Count -eq 12) 'Both Codex variants install twelve agents'
     Assert-True (Test-Path (Join-Path $agentDirectory '.codex-minions-lb-manifest')) 'LB agent manifest is installed'
 

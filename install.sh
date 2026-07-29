@@ -107,6 +107,7 @@ new_skill_stage() {
     cp -R "${profile}/." "${stage}/"
   fi
   cp "${overlay}/SKILL.md" "${overlay}/platform.md" "${stage}/"
+  [[ -f "${overlay}/models.md" ]] && cp "${overlay}/models.md" "${stage}/models.md"
   [[ -d "${ROOT}/scripts" ]] && cp -R "${ROOT}/scripts" "${stage}/scripts"
   [[ "${managed}" == "true" ]] && printf '%s\n' 'managed-by: copilot-minions' > "${stage}/.managed-by-copilot-minions"
   STAGE_PATHS+=("${stage}")
