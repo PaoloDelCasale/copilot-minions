@@ -13,7 +13,7 @@ const Role = StringEnum([
   "planner",
 ] as const);
 
-const schemas = {
+export const schemas = {
   start: Type.Object({
     variant: StringEnum(["standard", "lb"] as const, {
       description: "Routing profile selected by the invoked Pi minions skill.",

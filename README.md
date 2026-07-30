@@ -128,8 +128,9 @@ Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
 `<provider>/gpt-5.6-sol:medium`; workers use that provider's matrix while every model
 is qualified with the same provider. Required-model preflight and route lookup are
-provider-specific. Missing models fail preflight; there is no cross-provider or
-availability fallback. Closing the run restores the
+provider-specific. The installers and runtime require exact catalog IDs—including
+`github-copilot/grok-4.5`—and direct users to upgrade Pi when a route is missing;
+there is no cross-provider or availability fallback. Closing the run restores the
 parent's original model and thinking level.
 
 Pi renders a responsive worker-usage table above the editor with one row per active
@@ -149,8 +150,6 @@ Inspired by the model routing in
 [`nsEytgXm/subagents_configs`](https://github.com/nsEytgXm/subagents_configs), while
 preserving the existing minions flow:
 
-| Role | Model | Reasoning |
-|------|-------|-----------|
 OpenAI Codex (native and Pi):
 
 | Role | Model | Reasoning |

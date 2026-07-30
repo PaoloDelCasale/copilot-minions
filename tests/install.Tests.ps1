@@ -52,7 +52,11 @@ if "%1"=="--list-models" (
   echo openai-codex gpt-5.6-luna
   echo github-copilot gpt-5.6-sol
   echo github-copilot gpt-5.6-terra
-  echo github-copilot grok-4.5
+  if "%MINIONS_TEST_PI_MODELS%"=="near-grok" (
+    echo github-copilot grok-4x5
+  ) else if not "%MINIONS_TEST_PI_MODELS%"=="missing-grok" (
+    echo github-copilot grok-4.5
+  )
 )
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $bin 'pi.cmd')
@@ -195,6 +199,27 @@ exit /b 0
     Assert-True (Test-Path $codexRollbackSentinel) 'Later destination remains untouched after backup failure'
     Assert-True (Test-Path $untouchedLbSentinel) 'LB installation remains untouched after backup failure'
 
+    $piCatalogSentinel = Join-Path $piExtension 'catalog-sentinel'
+    Set-Content -LiteralPath $piCatalogSentinel -Value 'keep'
+    $env:MINIONS_TEST_PI_MODELS = 'missing-grok'
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform pi | Out-Null
+    } catch {
+        $failed = $true
+    }
+    Assert-True $failed 'Incompatible Pi catalog fails installation'
+    Assert-True (Test-Path $piCatalogSentinel) 'Failed Pi preflight leaves the installed extension untouched'
+    $env:MINIONS_TEST_PI_MODELS = 'near-grok'
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform pi | Out-Null
+    } catch {
+        $failed = $true
+    }
+    Assert-True $failed 'Near-match Pi model IDs are rejected'
+    Remove-Item Env:MINIONS_TEST_PI_MODELS
+
     Set-Content -LiteralPath (Join-Path $copilotSkill 'sentinel.txt') -Value 'keep'
     $env:MINIONS_TEST_MODELS = 'missing'
     $failed = $false
@@ -258,6 +283,7 @@ exit /b 0
     $env:MINIONS_HOME = $oldHome
     $env:LOCALAPPDATA = $oldLocalAppData
     Remove-Item Env:MINIONS_TEST_MODELS -ErrorAction SilentlyContinue
+    Remove-Item Env:MINIONS_TEST_PI_MODELS -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $temp) {
         Remove-Item -Recurse -Force -LiteralPath $temp
     }

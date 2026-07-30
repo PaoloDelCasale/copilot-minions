@@ -46,11 +46,39 @@ selected_platform() { [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]; }
 selected_variant() { [[ "${VARIANT}" == "$1" || "${VARIANT}" == "all" ]]; }
 require_directory() { [[ -d "$1" ]] || { echo "Source directory not found: $1" >&2; exit 1; }; }
 
-assert_pi_available() {
+assert_pi_models() {
   command -v pi >/dev/null 2>&1 || {
     echo "pi not found on PATH; Pi installation requires the Pi coding agent." >&2
     exit 1
   }
+  local catalog
+  if ! catalog="$(pi --list-models 2>&1)"; then
+    echo "Unable to read the Pi model catalog:" >&2
+    echo "${catalog}" >&2
+    exit 1
+  fi
+  local required=(
+    "openai-codex gpt-5.6-sol"
+    "openai-codex gpt-5.6-luna"
+    "github-copilot gpt-5.6-sol"
+    "github-copilot grok-4.5"
+  )
+  if selected_variant standard; then
+    required+=("openai-codex gpt-5.6-terra" "github-copilot gpt-5.6-terra")
+  fi
+  local missing=() route provider model
+  for route in "${required[@]}"; do
+    provider="${route%% *}"
+    model="${route#* }"
+    awk -v provider="${provider}" -v model="${model}" '
+      $1 == provider && $2 == model { found = 1 }
+      END { exit !found }
+    ' <<<"${catalog}" || missing+=("${provider}/${model}")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Pi model catalog is incompatible with Pi Minions; missing required route(s): ${missing[*]}. Upgrade Pi to a catalog that exposes these exact models." >&2
+    exit 1
+  fi
 }
 
 assert_codex_models() {
@@ -248,7 +276,7 @@ trap cleanup EXIT
 
 require_directory "${CORE}"
 selected_platform codex && assert_codex_models
-selected_platform pi && assert_pi_available
+selected_platform pi && assert_pi_models
 selected_platform pi && new_pi_extension_stage
 selected_variant standard && add_variant_stages standard
 selected_variant lb && add_variant_stages lb

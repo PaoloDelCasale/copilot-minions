@@ -2,6 +2,8 @@
 
 Pi selects exactly one matrix from the captured parent provider. Required-model
 preflight and route lookup use only that provider's catalog; there is no fallback.
+Installation and run start require every exact route ID. If Pi does not yet expose
+`github-copilot/grok-4.5`, upgrade Pi rather than substituting another model.
 
 ## `openai-codex`
 
