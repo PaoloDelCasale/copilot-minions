@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
+import { Value } from "typebox/value";
+import { schemas } from "../extensions/pi-minions/index.ts";
 import { createPiMinionsExtension } from "../extensions/pi-minions/orchestrator.mjs";
 
 const plainTheme = {
@@ -64,13 +66,30 @@ function createHarness({ provider = "openai-codex", modelId = "gpt-5.4", depende
       getBranch() { return sessionEntries; },
     },
   };
-  createPiMinionsExtension(pi, { schemas: {}, ...dependencies });
+  createPiMinionsExtension(pi, { schemas, ...dependencies });
   return { pi, tools, handlers, ctx, modelChanges, thinkingChanges, sentMessages, deliveredMessages, widgets, notifications, appendedEntries };
 }
 
 async function execute(tool, params, ctx) {
   return tool.execute("call-1", params, undefined, undefined, ctx);
 }
+
+test("the Pi extension registers TypeBox schemas for every public tool contract", () => {
+  const harness = createHarness();
+
+  assert.equal(Value.Check(harness.tools.get("minions_start").parameters, { variant: "standard" }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
+    tasks: [{ role: "explorer", task: "Inspect", timeoutSeconds: 30 }],
+  }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
+    tasks: [{ role: "unknown", task: "Inspect" }],
+  }), false);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, { tasks: [] }), false);
+  assert.equal(Value.Check(harness.tools.get("minions_read").parameters, {}), true);
+  assert.equal(Value.Check(harness.tools.get("minions_steer").parameters, { workerId: "worker-1", message: "Continue" }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_stop").parameters, {}), true);
+  assert.equal(Value.Check(harness.tools.get("minions_close").parameters, {}), true);
+});
 
 test("start captures Provider Affinity and selects the standard frontier route", async () => {
   const harness = createHarness();
@@ -82,13 +101,17 @@ test("start captures Provider Affinity and selects the standard frontier route",
   assert.deepEqual(harness.thinkingChanges, ["medium"]);
 });
 
-function fakeRpcProcess() {
+function fakeRpcProcess({ closeOnKill = true } = {}) {
   const process = new EventEmitter();
   process.stdout = new EventEmitter();
   process.stderr = new EventEmitter();
   process.stdin = { writes: [], write(value) { this.writes.push(value); } };
   process.kills = [];
-  process.kill = (signal) => { process.kills.push(signal); return true; };
+  process.kill = (signal) => {
+    process.kills.push(signal);
+    if (closeOnKill) process.emit("close", null);
+    return true;
+  };
   return process;
 }
 
@@ -152,6 +175,57 @@ test("spawn starts an ephemeral trusted RPC worker on the role route", async () 
   assert.equal(spawns[0].options.cwd, "/repo/.worktrees/t1");
   assert.deepEqual(JSON.parse(process.stdin.writes[0]), { type: "prompt", message: "Implement T1" });
   assert.match(result.content[0].text, /implementer/);
+});
+
+test("spawn preflights the full batch before launching any worker", async () => {
+  const spawns = [];
+  const harness = createHarness({ dependencies: {
+    spawnProcess(command, args, options) {
+      spawns.push({ command, args, options });
+      return fakeRpcProcess();
+    },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+
+  await assert.rejects(
+    execute(harness.tools.get("minions_spawn"), { tasks: [
+      { role: "explorer", task: "Explore first" },
+      { role: "implementer", modelOverride: "missing-model", task: "Implement second" },
+    ] }, harness.ctx),
+    /Provider openai-codex does not offer requested model missing-model/,
+  );
+
+  assert.equal(spawns.length, 0);
+  const read = await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  assert.deepEqual(read.details.workers, []);
+});
+
+test("modelOverride applies independently to every task in a valid batch", async () => {
+  const spawns = [];
+  const children = [fakeRpcProcess(), fakeRpcProcess()];
+  const harness = createHarness({ dependencies: {
+    spawnProcess(command, args, options) {
+      spawns.push({ command, args, options });
+      return children.shift();
+    },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+
+  const result = await execute(harness.tools.get("minions_spawn"), { tasks: [
+    { role: "explorer", modelOverride: "gpt-5.6-sol", task: "Explore first" },
+    { role: "implementer", modelOverride: "gpt-5.6-terra", task: "Implement second" },
+  ] }, harness.ctx);
+
+  assert.deepEqual(result.details.workers.map(({ model, thinking }) => ({ model, thinking })), [
+    { model: "gpt-5.6-sol", thinking: "high" },
+    { model: "gpt-5.6-terra", thinking: "xhigh" },
+  ]);
+  assert.deepEqual(spawns.map(({ args }) => args[args.indexOf("--model") + 1]), [
+    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-5.6-terra",
+  ]);
 });
 
 test("Copilot standard and low-budget routes replace Luna with Grok high only", async () => {
@@ -282,11 +356,11 @@ test("Copilot low-budget Luna overrides become Grok high while named Sol escalat
 });
 
 test("worker steering, stopping, and close are exposed through managed tools", async () => {
-  const child = fakeRpcProcess();
+  const child = fakeRpcProcess({ closeOnKill: true });
   const harness = createHarness({ dependencies: {
     spawnProcess() { return child; },
     piInvocation: { command: "pi", args: [] },
-    setTimeout() { return 1; },
+    setTimeout(callback) { callback(); return 1; },
   } });
   await execute(harness.tools.get("minions_start"), { variant: "lb" }, harness.ctx);
   const spawned = await execute(harness.tools.get("minions_spawn"), {
@@ -305,6 +379,33 @@ test("worker steering, stopping, and close are exposed through managed tools", a
   assert.match(closed.content[0].text, /closed/i);
   assert.deepEqual(harness.modelChanges.at(-1), { provider: "openai-codex", id: "gpt-5.4" });
   assert.equal(harness.thinkingChanges.at(-1), "high");
+});
+
+test("stop completes only after the worker process exits", async () => {
+  const child = fakeRpcProcess({ closeOnKill: true });
+  const scheduled = [];
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+    setTimeout(callback, delay) { scheduled.push({ callback, delay }); return scheduled.length; },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Explore" }],
+  }, harness.ctx);
+  const workerId = spawned.details.workers[0].id;
+
+  let stopSettled = false;
+  const stopping = execute(harness.tools.get("minions_stop"), { workerIds: [workerId] }, harness.ctx)
+    .then(() => { stopSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(stopSettled, false);
+  assert.deepEqual(JSON.parse(child.stdin.writes.at(-1)), { type: "abort" });
+  assert.equal(scheduled[0].delay, 2_000);
+  scheduled[0].callback();
+  await stopping;
+  assert.deepEqual(child.kills, ["SIGTERM"]);
 });
 
 test("close credits all worker usage not yet returned by read", async () => {
@@ -348,10 +449,11 @@ test("close restores the original Copilot model and thinking level", async () =>
 });
 
 test("a failed model restore keeps the run active in persisted state", async () => {
-  const child = fakeRpcProcess();
+  const child = fakeRpcProcess({ closeOnKill: true });
   const harness = createHarness({ setModelResults: [true, false], dependencies: {
     spawnProcess() { return child; },
     piInvocation: { command: "pi", args: [] },
+    setTimeout(callback) { callback(); return 1; },
   } });
   await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
   const spawned = await execute(harness.tools.get("minions_spawn"), {
@@ -373,6 +475,20 @@ test("Pi redirects Codex minion skill commands to the Pi adapter", async () => {
 
   assert.deepEqual(standard, { action: "transform", text: "/skill:pi-minions build it" });
   assert.deepEqual(lowBudget, { action: "transform", text: "/skill:pi-minions-lb build it" });
+});
+
+test("Pi hooks inject routing guidance and lock active-run thinking", async () => {
+  const harness = createHarness();
+
+  const prompt = await harness.handlers.get("before_agent_start")({ systemPrompt: "Base prompt" }, harness.ctx);
+  assert.match(prompt.systemPrompt, /^Base prompt\n\nPi harness routing:/);
+  assert.match(prompt.systemPrompt, /After minions_spawn, end the turn immediately/);
+
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await harness.handlers.get("thinking_level_select")({ level: "high", previousLevel: "medium" }, harness.ctx);
+
+  assert.equal(harness.thinkingChanges.at(-1), "medium");
+  assert.match(harness.notifications.at(-1).message, /locked to medium/);
 });
 
 test("active runs lock the frontier model and block session replacement with workers in flight", async () => {
@@ -411,6 +527,107 @@ test("a settled worker notifies a busy frontier without waiting for it to become
 
   assert.equal(harness.deliveredMessages.length, 1);
   assert.equal(harness.deliveredMessages[0].message.customType, "pi-minions-completion");
+});
+
+test("read reports a non-zero RPC process exit as blocked", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Inspect" }],
+  }, harness.ctx);
+
+  child.emit("close", 17);
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [spawned.details.workers[0].id] }, harness.ctx);
+
+  assert.equal(read.details.workers[0].status, "blocked");
+  assert.equal(read.details.workers[0].exitCode, 17);
+  assert.equal(read.details.workers[0].error, "RPC process exited with code 17.");
+});
+
+test("read reports an RPC process error as blocked", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Inspect" }],
+  }, harness.ctx);
+
+  child.emit("error", new Error("spawn EACCES"));
+  child.emit("close", null);
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [spawned.details.workers[0].id] }, harness.ctx);
+
+  assert.equal(read.details.workers[0].status, "blocked");
+  assert.equal(read.details.workers[0].error, "spawn EACCES");
+});
+
+test("read reports a rejected RPC prompt as blocked", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Inspect" }],
+  }, harness.ctx);
+
+  child.stdout.emit("data", `${JSON.stringify({ type: "response", command: "prompt", success: false, error: "Prompt queue rejected" })}\n`);
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [spawned.details.workers[0].id] }, harness.ctx);
+
+  assert.equal(read.details.workers[0].status, "blocked");
+  assert.equal(read.details.workers[0].error, "Prompt queue rejected");
+  assert.deepEqual(child.kills, ["SIGTERM"]);
+});
+
+test("read exposes worker stderr while the RPC process is running", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Inspect" }],
+  }, harness.ctx);
+
+  child.stderr.emit("data", Buffer.from("provider warning\n"));
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [spawned.details.workers[0].id] }, harness.ctx);
+
+  assert.equal(read.details.workers[0].stderr, "provider warning\n");
+  assert.match(read.content[0].text, /provider warning/);
+});
+
+test("read reconstructs UTF-8 JSONL records fragmented inside a multibyte character", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "explorer", task: "Inspect UTF-8 handling" }],
+  }, harness.ctx);
+  const workerId = spawned.details.workers[0].id;
+  const output = "Caffè pronto 🚀";
+  const records = Buffer.from(
+    `${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: output }], stopReason: "stop" } })}\n${JSON.stringify({ type: "agent_settled" })}\n`,
+    "utf8",
+  );
+  const split = records.indexOf(Buffer.from("🚀")) + 2;
+
+  child.stdout.emit("data", records.subarray(0, split));
+  child.stdout.emit("data", records.subarray(split, split + 1));
+  child.stdout.emit("data", records.subarray(split + 1));
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [workerId] }, harness.ctx);
+
+  assert.equal(read.details.workers[0].output, output);
 });
 
 test("read exposes the current RPC tool and its latest progress before the worker settles", async () => {
@@ -463,6 +680,38 @@ test("read accounts worker token usage and cost exactly once in the parent sessi
   assert.deepEqual(firstRead.details.workers[0].usage, firstRead.usage);
   assert.equal(secondRead.usage, undefined);
   assert.deepEqual(secondRead.details.workers[0].usage, firstRead.usage);
+});
+
+test("read then close credits worker usage exactly once", async () => {
+  const child = fakeRpcProcess();
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const spawned = await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "reviewer", task: "Review" }],
+  }, harness.ctx);
+  const usage = {
+    input: 12,
+    output: 3,
+    cacheRead: 2,
+    cacheWrite: 1,
+    totalTokens: 18,
+    cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0.001, total: 0.034 },
+  };
+  child.stdout.emit("data", `${JSON.stringify({ type: "message_end", message: {
+    role: "assistant",
+    content: [{ type: "text", text: "Reviewed" }],
+    stopReason: "stop",
+    usage,
+  } })}\n${JSON.stringify({ type: "agent_settled" })}\n`);
+
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [spawned.details.workers[0].id] }, harness.ctx);
+  const closed = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
+
+  assert.deepEqual(read.usage, usage);
+  assert.equal(closed.usage, undefined);
 });
 
 test("the Pi widget renders one usage row per Active Worker without long activity text", async () => {
@@ -740,6 +989,32 @@ test("an explicit worker deadline blocks and aborts a worker that does not settl
   assert.equal(read.details.workers[0].status, "blocked");
   assert.match(read.details.workers[0].error, /30 seconds/);
   assert.deepEqual(JSON.parse(child.stdin.writes.at(-1)), { type: "abort" });
+});
+
+test("close waits for a timed-out worker process to exit", async () => {
+  const child = fakeRpcProcess({ closeOnKill: true });
+  const scheduled = [];
+  const harness = createHarness({ dependencies: {
+    spawnProcess() { return child; },
+    piInvocation: { command: "pi", args: [] },
+    setTimeout(callback, delay) { scheduled.push({ callback, delay }); return scheduled.length; },
+    clearTimeout() {},
+  } });
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  await execute(harness.tools.get("minions_spawn"), {
+    tasks: [{ role: "mechanical", task: "Run verification", timeoutSeconds: 1 }],
+  }, harness.ctx);
+  scheduled.find(({ delay }) => delay === 1_000).callback();
+
+  let closeSettled = false;
+  const closing = execute(harness.tools.get("minions_close"), {}, harness.ctx)
+    .then(() => { closeSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(closeSettled, false);
+  scheduled.find(({ delay }) => delay === 2_000).callback();
+  await closing;
+  assert.deepEqual(child.kills, ["SIGTERM"]);
 });
 
 test("reload preserves interrupted diagnostics but removes the Active Worker widget", async () => {

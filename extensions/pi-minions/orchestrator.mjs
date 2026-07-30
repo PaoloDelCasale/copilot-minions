@@ -421,7 +421,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }, 50);
   }
 
-  function startWorker(spec, ctx) {
+  function resolveWorkerRoute(spec, ctx) {
     const matrix = PROVIDER_MATRICES[run.provider]?.[run.variant];
     const roleRoute = matrix?.routes[spec.role];
     if (!roleRoute) throw new Error(`Unknown worker role: ${spec.role}`);
@@ -432,6 +432,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     if (!ctx.modelRegistry.find(run.provider, modelId)) {
       throw new Error(`Provider ${run.provider} does not offer requested model ${modelId}.`);
     }
+    return { modelId, thinking };
+  }
+
+  function startWorker(spec, ctx, route) {
+    const { modelId, thinking } = route;
     const id = randomUUID();
     const args = [
       ...piInvocation.args,
@@ -448,6 +453,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    let resolveExit;
+    const exitPromise = new Promise((resolve) => { resolveExit = resolve; });
     const worker = {
       id,
       role: spec.role,
@@ -465,6 +472,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       finalized: false,
       startedAt: now(),
       timeoutSeconds: spec.timeoutSeconds,
+      exitPromise,
+      resolveExit,
     };
     run.workers.set(id, worker);
     updateWorkerWidget(ctx);
@@ -533,6 +542,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     child.once?.("close", (code) => {
       if (!worker.finalized) finalize(code === 0 ? "done" : "blocked", code === 0 ? undefined : `RPC process exited with code ${code}.`);
       worker.exitCode = code;
+      worker.resolveExit();
     });
     child.stdin.write(`${JSON.stringify({ type: "prompt", message: spec.task })}\n`);
     return worker;
@@ -603,7 +613,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (tasks.length === 0) throw new Error("At least one worker task is required.");
       const inFlight = [...run.workers.values()].filter((worker) => worker.status === "in-flight").length;
       if (inFlight + tasks.length > 6) throw new Error("Pi minions allows at most six in-flight workers.");
-      const workers = tasks.map((task) => startWorker(task, ctx));
+      const routes = tasks.map((task) => resolveWorkerRoute(task, ctx));
+      const workers = tasks.map((task, index) => startWorker(task, ctx, routes[index]));
       persistRun();
       return textResult(`Spawned ${workers.length} background worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}. End this turn now; do not poll. Wait for completion notifications before calling minions_read.`, {
         workers: workers.map(({ id, role, cwd, provider, model, thinking, routeOverride, status }) => ({ id, role, cwd, provider, model, thinking, routeOverride, status })),
@@ -665,10 +676,13 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       if (!run) throw new Error("No orchestration run is active.");
       const ids = params.workerIds?.length ? params.workerIds : [...run.workers.values()].filter((worker) => worker.status === "in-flight").map((worker) => worker.id);
+      const selectedWorkers = [];
       for (const id of ids) {
         const worker = run.workers.get(id);
         if (!worker) throw new Error(`Unknown worker: ${id}`);
+        selectedWorkers.push(worker);
         if (worker.status !== "in-flight") continue;
+        if (worker.timeoutTimer) cancelSchedule(worker.timeoutTimer);
         worker.status = "stopped";
         worker.finalized = true;
         worker.completedAt = now();
@@ -678,6 +692,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         killTimer?.unref?.();
       }
       persistRun();
+      await Promise.all(selectedWorkers.map((worker) => worker.exitPromise));
       return textResult(`Stopped ${ids.length} worker(s).`, { workerIds: ids });
     },
   });
@@ -692,6 +707,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const active = [...run.workers.values()].filter((worker) => worker.status === "in-flight");
       if (active.length > 0) throw new Error(`Cannot close with ${active.length} in-flight worker(s).`);
       const closing = run;
+      await Promise.all([...closing.workers.values()].map((worker) => worker.exitPromise));
       const pendingUsage = combineUsage(...[...closing.workers.values()].map((worker) => worker.pendingUsage));
       persistRun("closed");
       run = undefined;

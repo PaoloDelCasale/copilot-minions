@@ -43,8 +43,12 @@ if [[ "${1:-}" == "--list-models" ]]; then
     'openai-codex gpt-5.6-terra' \
     'openai-codex gpt-5.6-luna' \
     'github-copilot gpt-5.6-sol' \
-    'github-copilot gpt-5.6-terra' \
-    'github-copilot grok-4.5'
+    'github-copilot gpt-5.6-terra'
+  case "${MINIONS_TEST_PI_MODELS:-complete}" in
+    missing-grok) ;;
+    near-grok) printf '%s\n' 'github-copilot grok-4x5' ;;
+    *) printf '%s\n' 'github-copilot grok-4.5' ;;
+  esac
 fi
 EOF
 
@@ -138,6 +142,20 @@ unset MINIONS_TEST_FAIL_MOVE_TARGET MINIONS_TEST_FAIL_MOVE_STATE
 [[ -f "${COPILOT_SKILL}/rollback-sentinel" ]]
 [[ -f "${CODEX_SKILL}/rollback-sentinel" ]]
 [[ -f "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/untouched-sentinel" ]]
+
+touch "${PI_EXTENSION}/catalog-sentinel"
+export MINIONS_TEST_PI_MODELS=missing-grok
+if bash "${ROOT}/install.sh" --platform pi >/dev/null 2>&1; then
+  echo 'Expected incompatible Pi catalog preflight to fail.' >&2
+  exit 1
+fi
+[[ -f "${PI_EXTENSION}/catalog-sentinel" ]]
+export MINIONS_TEST_PI_MODELS=near-grok
+if bash "${ROOT}/install.sh" --platform pi >/dev/null 2>&1; then
+  echo 'Expected near-match Pi model IDs to fail.' >&2
+  exit 1
+fi
+unset MINIONS_TEST_PI_MODELS
 
 touch "${COPILOT_SKILL}/sentinel"
 export MINIONS_TEST_MODELS=missing
