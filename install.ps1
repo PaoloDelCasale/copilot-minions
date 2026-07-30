@@ -13,6 +13,11 @@ $installHome = if ($env:MINIONS_HOME) { $env:MINIONS_HOME } else { $HOME }
 $core = Join-Path $root 'skills\core'
 $lbProfile = Join-Path $root 'skills\lb'
 $managedMarker = '# managed-by: copilot-minions'
+$piSubagentsPackage = if ($env:PI_SUBAGENTS_PACKAGE) {
+    $env:PI_SUBAGENTS_PACKAGE
+} else {
+    'npm:pi-subagents@0.37.2'
+}
 $transactionId = [Guid]::NewGuid().ToString('N')
 $stagedSkills = @()
 $agentStages = @()
@@ -62,6 +67,14 @@ function Assert-PiModels {
     } | ForEach-Object { "$($_[0])/$($_[1])" })
     if ($missing.Count -gt 0) {
         throw "Pi model catalog is incompatible with Pi Minions; missing required route(s): $($missing -join ', '). Upgrade Pi to a catalog that exposes these exact models."
+    }
+}
+
+function Install-PiRuntime {
+    Write-Host "Installing pinned Pi worker runtime: $piSubagentsPackage"
+    & pi install $piSubagentsPackage
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to install $piSubagentsPackage; no Minions resources were committed."
     }
 }
 
@@ -173,6 +186,24 @@ function New-PiExtensionStage {
     Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
     $script:stagedSkills += [pscustomobject]@{
         Name = 'pi-minions-extension'
+        Stage = $stage
+        Destination = $destination
+    }
+}
+
+function New-PiAgentsStage {
+    $source = Join-Path $root 'extensions\pi-minions\agents'
+    $destination = Join-Path $installHome '.pi\agent\agents\copilot-minions'
+    Assert-Directory $source
+    Assert-ManagedPiDirectory $destination
+    $parent = Split-Path -Parent $destination
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    $stage = Join-Path $parent ".copilot-minions-agents.stage.$transactionId"
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
+    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
+    $script:stagedSkills += [pscustomobject]@{
+        Name = 'pi-minions-agents'
         Stage = $stage
         Destination = $destination
     }
@@ -307,12 +338,16 @@ try {
     if (Test-Platform 'pi') {
         Assert-PiModels
         New-PiExtensionStage
+        New-PiAgentsStage
     }
     if (Test-Variant 'standard') {
         Add-VariantStages 'standard'
     }
     if (Test-Variant 'lb') {
         Add-VariantStages 'lb'
+    }
+    if (Test-Platform 'pi') {
+        Install-PiRuntime
     }
     Commit-Transaction
 } catch {
@@ -346,6 +381,9 @@ foreach ($skill in $stagedSkills) {
 }
 if (Test-Platform 'codex') {
     Write-Host "  $(Join-Path $installHome '.codex\agents') (managed minions agents)"
+}
+if (Test-Platform 'pi') {
+    Write-Host "  $piSubagentsPackage (pinned Pi worker runtime)"
 }
 Write-Host ''
 

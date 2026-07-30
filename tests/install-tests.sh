@@ -10,9 +10,22 @@ export CACHE_DIR="${TEMP}/cache"
 export PATH="${TEMP}/bin:${PATH}"
 mkdir -p "${MINIONS_HOME}" "${TEMP}/bin" "${CACHE_DIR}/.git"
 
-for discipline in implement to-spec to-tickets; do
-  mkdir -p "${CACHE_DIR}/skills/engineering/${discipline}"
-  printf '%s\n' "---" "name: ${discipline}" "---" > "${CACHE_DIR}/skills/engineering/${discipline}/SKILL.md"
+DISCIPLINE_FIXTURES=(
+  "implement:engineering/implement"
+  "to-spec:engineering/to-spec"
+  "to-tickets:engineering/to-tickets"
+  "tdd:engineering/tdd"
+  "code-review:engineering/code-review"
+  "diagnosing-bugs:engineering/diagnosing-bugs"
+  "codebase-design:engineering/codebase-design"
+  "domain-modeling:engineering/domain-modeling"
+  "grilling:productivity/grilling"
+)
+for entry in "${DISCIPLINE_FIXTURES[@]}"; do
+  discipline="${entry%%:*}"
+  relative_path="${entry#*:}"
+  mkdir -p "${CACHE_DIR}/skills/${relative_path}"
+  printf '%s\n' "---" "name: ${discipline}" "---" > "${CACHE_DIR}/skills/${relative_path}/SKILL.md"
 done
 
 cat > "${TEMP}/bin/codex" <<'EOF'
@@ -49,6 +62,8 @@ if [[ "${1:-}" == "--list-models" ]]; then
     near-grok) printf '%s\n' 'github-copilot grok-4x5' ;;
     *) printf '%s\n' 'github-copilot grok-4.5' ;;
   esac
+elif [[ "${1:-}" == "install" ]]; then
+  printf '%s\n' "${2:-}" >> "${MINIONS_TEST_PI_INSTALL_LOG}"
 fi
 EOF
 
@@ -79,12 +94,14 @@ count_files() {
 }
 
 export MINIONS_TEST_MODELS=complete
+export MINIONS_TEST_PI_INSTALL_LOG="${TEMP}/pi-install.log"
 bash "${ROOT}/install.sh" --platform all >/dev/null
 
 COPILOT_SKILL="${MINIONS_HOME}/.copilot/skills/copilot-minions"
 CODEX_SKILL="${MINIONS_HOME}/.agents/skills/codex-minions"
 PI_SKILL="${MINIONS_HOME}/.pi/agent/skills/pi-minions"
 PI_EXTENSION="${MINIONS_HOME}/.pi/agent/extensions/pi-minions"
+PI_AGENTS="${MINIONS_HOME}/.pi/agent/agents/copilot-minions"
 AGENTS="${MINIONS_HOME}/.codex/agents"
 
 [[ -f "${COPILOT_SKILL}/frontier.md" ]]
@@ -96,6 +113,10 @@ AGENTS="${MINIONS_HOME}/.codex/agents"
 grep -Fq 'Triage: 8/8' "${PI_SKILL}/control.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
 [[ -f "${PI_EXTENSION}/index.ts" ]]
+[[ -f "${PI_AGENTS}/pi-minions-reviewer.md" ]]
+[[ -f "${PI_AGENTS}/pi-minions-review-axis.md" ]]
+[[ "$(count_files "${PI_AGENTS}"/pi-minions-*.md)" -eq 7 ]]
+grep -Fxq 'npm:pi-subagents@0.37.2' "${MINIONS_TEST_PI_INSTALL_LOG}"
 [[ -f "${COPILOT_SKILL}/platform.md" ]]
 [[ -f "${CODEX_SKILL}/platform.md" ]]
 grep -Eq 'mechanical.*grok-4\.5.*high' "${COPILOT_SKILL}/models.md"
@@ -105,7 +126,7 @@ grep -Fq '## `github-copilot`' "${PI_SKILL}/models.md"
 [[ ! -e "${CODEX_SKILL}/custom-agents" ]]
 [[ "$(count_files "${AGENTS}"/codex-minions-*.toml)" -eq 6 ]]
 [[ -f "${AGENTS}/.codex-minions-manifest" ]]
-for discipline in implement to-spec to-tickets; do
+for discipline in implement to-spec to-tickets tdd code-review diagnosing-bugs codebase-design domain-modeling grilling; do
   [[ -L "${MINIONS_HOME}/.agents/skills/${discipline}" ]]
   [[ -L "${MINIONS_HOME}/.pi/agent/skills/${discipline}" ]]
 done

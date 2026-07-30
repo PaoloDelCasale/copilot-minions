@@ -17,8 +17,20 @@ $oldLocalAppData = $env:LOCALAPPDATA
 
 try {
     New-Item -ItemType Directory -Force -Path $testHome, $bin, (Join-Path $cache '.git') | Out-Null
-    foreach ($discipline in @('implement', 'to-spec', 'to-tickets')) {
-        $directory = Join-Path $cache "skills\engineering\$discipline"
+    $disciplineFixtures = @(
+        [pscustomobject]@{ Name = 'implement'; Path = 'engineering\implement' },
+        [pscustomobject]@{ Name = 'to-spec'; Path = 'engineering\to-spec' },
+        [pscustomobject]@{ Name = 'to-tickets'; Path = 'engineering\to-tickets' },
+        [pscustomobject]@{ Name = 'tdd'; Path = 'engineering\tdd' },
+        [pscustomobject]@{ Name = 'code-review'; Path = 'engineering\code-review' },
+        [pscustomobject]@{ Name = 'diagnosing-bugs'; Path = 'engineering\diagnosing-bugs' },
+        [pscustomobject]@{ Name = 'codebase-design'; Path = 'engineering\codebase-design' },
+        [pscustomobject]@{ Name = 'domain-modeling'; Path = 'engineering\domain-modeling' },
+        [pscustomobject]@{ Name = 'grilling'; Path = 'productivity\grilling' }
+    )
+    foreach ($entry in $disciplineFixtures) {
+        $discipline = $entry.Name
+        $directory = Join-Path $cache "skills\$($entry.Path)"
         New-Item -ItemType Directory -Force -Path $directory | Out-Null
         Set-Content -LiteralPath (Join-Path $directory 'SKILL.md') -Value "---`nname: $discipline`n---"
     }
@@ -58,6 +70,9 @@ if "%1"=="--list-models" (
     echo github-copilot grok-4.5
   )
 )
+if "%1"=="install" (
+  echo %2>>"%MINIONS_TEST_PI_INSTALL_LOG%"
+)
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $bin 'pi.cmd')
 
@@ -71,6 +86,7 @@ exit /b 0
     $env:LOCALAPPDATA = $temp
     $env:PATH = "$bin;$oldPath"
     $env:MINIONS_TEST_MODELS = 'complete'
+    $env:MINIONS_TEST_PI_INSTALL_LOG = Join-Path $temp 'pi-install.log'
     $expectedCache = Join-Path $temp 'copilot-minions\mattpocock-skills'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $expectedCache) | Out-Null
     Move-Item -LiteralPath $cache -Destination $expectedCache
@@ -81,6 +97,7 @@ exit /b 0
     $codexSkill = Join-Path $testHome '.agents\skills\codex-minions'
     $piSkill = Join-Path $testHome '.pi\agent\skills\pi-minions'
     $piExtension = Join-Path $testHome '.pi\agent\extensions\pi-minions'
+    $piAgents = Join-Path $testHome '.pi\agent\agents\copilot-minions'
     Assert-True (Test-Path (Join-Path $copilotSkill 'frontier.md')) 'Copilot contains shared core'
     Assert-True (Test-Path (Join-Path $codexSkill 'frontier.md')) 'Codex contains shared core'
     Assert-True (Test-Path (Join-Path $piSkill 'frontier.md')) 'Pi contains shared core'
@@ -90,6 +107,10 @@ exit /b 0
     Assert-True ((Get-Content (Join-Path $piSkill 'control.md') -Raw) -match 'Triage: 8/8') 'Control gate contains hard handoff budget'
     Assert-True (Test-Path (Join-Path $piSkill 'platform.md')) 'Pi contains adapter'
     Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'
+    Assert-True (Test-Path (Join-Path $piAgents 'pi-minions-reviewer.md')) 'Pi reviewer agent is installed'
+    Assert-True (Test-Path (Join-Path $piAgents 'pi-minions-review-axis.md')) 'Pi two-axis leaf reviewer is installed'
+    Assert-True (@(Get-ChildItem -LiteralPath $piAgents -Filter 'pi-minions-*.md').Count -eq 7) 'Seven Pi custom agents are installed'
+    Assert-True ((Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw).Contains('npm:pi-subagents@0.37.2')) 'Pinned pi-subagents runtime is installed'
     Assert-True (Test-Path (Join-Path $copilotSkill 'platform.md')) 'Copilot contains adapter'
     Assert-True (Test-Path (Join-Path $codexSkill 'platform.md')) 'Codex contains adapter'
     Assert-True ((Get-Content (Join-Path $copilotSkill 'models.md') -Raw) -match 'mechanical.*grok-4\.5.*high') 'Copilot gets its provider matrix'
@@ -104,7 +125,7 @@ exit /b 0
     Assert-True ($agents.Count -eq 6) 'Six Codex custom agents are installed'
     Assert-True (Test-Path (Join-Path $agentDirectory '.codex-minions-manifest')) 'Agent manifest is installed'
 
-    foreach ($discipline in @('implement', 'to-spec', 'to-tickets')) {
+    foreach ($discipline in @('implement', 'to-spec', 'to-tickets', 'tdd', 'code-review', 'diagnosing-bugs', 'codebase-design', 'domain-modeling', 'grilling')) {
         $link = Get-Item -LiteralPath (Join-Path $testHome ".agents\skills\$discipline") -Force
         Assert-True ([bool]$link.LinkType) "$discipline is linked for Codex"
         $piLink = Get-Item -LiteralPath (Join-Path $testHome ".pi\agent\skills\$discipline") -Force
@@ -284,6 +305,7 @@ exit /b 0
     $env:LOCALAPPDATA = $oldLocalAppData
     Remove-Item Env:MINIONS_TEST_MODELS -ErrorAction SilentlyContinue
     Remove-Item Env:MINIONS_TEST_PI_MODELS -ErrorAction SilentlyContinue
+    Remove-Item Env:MINIONS_TEST_PI_INSTALL_LOG -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $temp) {
         Remove-Item -Recurse -Force -LiteralPath $temp
     }

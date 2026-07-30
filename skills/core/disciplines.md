@@ -19,7 +19,8 @@ If unavailable, they follow the complete inline constraints in [`prompts.md`](pr
 Any discipline instruction to interview, publish, or run review inside implementation
 is overridden: the worker returns a STATUS, and the frontier owns those actions.
 
-The platform-aware updater keeps `implement`, `to-spec`, and `to-tickets` current from
-`mattpocock/skills`. Copilot registers the cache through its CLI. Codex links the cache
-under `~/.agents/skills`; Pi links it under `~/.pi/agent/skills`.
-
+The platform-aware updater installs all disciplines in this table from the reviewed,
+pinned `mattpocock/skills` revision. Copilot registers the cache through its CLI.
+Codex links it under `~/.agents/skills`; Pi links it under
+`~/.pi/agent/skills`. Pi passes the requested discipline explicitly to
+`pi-subagents` when its `SKILL.md` is present.

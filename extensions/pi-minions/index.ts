@@ -48,6 +48,10 @@ export const schemas = {
     workerId: Type.String(),
     message: Type.String(),
   }),
+  resume: Type.Object({
+    workerId: Type.String(),
+    message: Type.String({ description: "Follow-up instruction for a paused, failed, or completed worker." }),
+  }),
   stop: Type.Object({
     workerIds: Type.Optional(Type.Array(Type.String(), { description: "Worker IDs; omit to stop every in-flight worker." })),
   }),

@@ -29,6 +29,7 @@ INSTALL_HOME="${MINIONS_HOME:-$HOME}"
 CORE="${ROOT}/skills/core"
 LB_PROFILE="${ROOT}/skills/lb"
 MANAGED_MARKER="# managed-by: copilot-minions"
+PI_SUBAGENTS_PACKAGE="${PI_SUBAGENTS_PACKAGE:-npm:pi-subagents@0.37.2}"
 TRANSACTION_ID="$$.$RANDOM"
 STAGE_PATHS=()
 SKILL_STAGES=()
@@ -77,6 +78,14 @@ assert_pi_models() {
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "Pi model catalog is incompatible with Pi Minions; missing required route(s): ${missing[*]}. Upgrade Pi to a catalog that exposes these exact models." >&2
+    exit 1
+  fi
+}
+
+install_pi_runtime() {
+  echo "Installing pinned Pi worker runtime: ${PI_SUBAGENTS_PACKAGE}"
+  if ! pi install "${PI_SUBAGENTS_PACKAGE}"; then
+    echo "Unable to install ${PI_SUBAGENTS_PACKAGE}; no Minions resources were committed." >&2
     exit 1
   fi
 }
@@ -153,6 +162,23 @@ new_pi_extension_stage() {
   parent="$(dirname "${destination}")"
   mkdir -p "${parent}"
   stage="${parent}/.pi-minions.stage.${TRANSACTION_ID}"
+  mkdir -p "${stage}"
+  cp -R "${source}/." "${stage}/"
+  STAGE_PATHS+=("${stage}")
+  SKILL_STAGES+=("${stage}")
+  SKILL_DESTS+=("${destination}")
+  SKILL_BACKUPS+=("")
+}
+
+new_pi_agents_stage() {
+  local source="${ROOT}/extensions/pi-minions/agents"
+  local destination="${INSTALL_HOME}/.pi/agent/agents/copilot-minions"
+  require_directory "${source}"
+  assert_managed_pi_directory "${destination}"
+  local parent stage
+  parent="$(dirname "${destination}")"
+  mkdir -p "${parent}"
+  stage="${parent}/.copilot-minions-agents.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
   cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
@@ -277,9 +303,13 @@ trap cleanup EXIT
 require_directory "${CORE}"
 selected_platform codex && assert_codex_models
 selected_platform pi && assert_pi_models
-selected_platform pi && new_pi_extension_stage
+if selected_platform pi; then
+  new_pi_extension_stage
+  new_pi_agents_stage
+fi
 selected_variant standard && add_variant_stages standard
 selected_variant lb && add_variant_stages lb
+selected_platform pi && install_pi_runtime
 
 COMMIT_STARTED=1
 for i in "${!SKILL_DESTS[@]}"; do
@@ -337,6 +367,7 @@ fi
 echo "Installed platform: ${PLATFORM}; variant: ${VARIANT}"
 for destination in "${SKILL_DESTS[@]}"; do echo "  ${destination}"; done
 selected_platform codex && echo "  ${INSTALL_HOME}/.codex/agents (managed minions agents)"
+selected_platform pi && echo "  ${PI_SUBAGENTS_PACKAGE} (pinned Pi worker runtime)"
 echo
 
 UPDATER="${ROOT}/scripts/update-disciplines.sh"
