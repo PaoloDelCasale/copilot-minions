@@ -104,8 +104,11 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $copilotSkill 'control.md')) 'Copilot contains control gate'
     Assert-True (Test-Path (Join-Path $codexSkill 'control.md')) 'Codex contains control gate'
     Assert-True (Test-Path (Join-Path $piSkill 'control.md')) 'Pi contains control gate'
-    Assert-True ((Get-Content (Join-Path $piSkill 'control.md') -Raw) -match 'Triage: 8/8') 'Control gate contains hard handoff budget'
+    $piControl = Get-Content (Join-Path $piSkill 'control.md') -Raw
+    Assert-True ($piControl.Contains('Triage: 8/12')) 'Control gate contains soft closure budget'
+    Assert-True ($piControl.Contains('Triage: 12/12')) 'Control gate contains hard handoff budget'
     Assert-True (Test-Path (Join-Path $piSkill 'platform.md')) 'Pi contains adapter'
+    Assert-True ((Get-Content (Join-Path $piSkill 'platform.md') -Raw).Contains('budgetClass: "closure"')) 'Pi adapter labels closure-only dispatch'
     Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'
     Assert-True (Test-Path (Join-Path $piAgents 'pi-minions-reviewer.md')) 'Pi reviewer agent is installed'
     Assert-True (Test-Path (Join-Path $piAgents 'pi-minions-review-axis.md')) 'Pi two-axis leaf reviewer is installed'

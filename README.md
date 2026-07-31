@@ -95,8 +95,10 @@ Opt out with `/direct`, `skip minions`, or `skip workers`.
 
 Each orchestration run declares one bounded Goal, completion criteria, out-of-scope
 work, fixed point, verification contract, and worker/triage budgets. After eight
-worker results the frontier stops dispatching, drains in-flight work, posts a full
-handoff, and closes the run. Adjacent issue slices require a new explicit Goal.
+worker results the frontier enters closure mode and permits only already-boarded fix,
+review, gate, commit, or landing work. At twelve results it stops dispatching, drains
+in-flight work, posts a full handoff, and closes the run. Adjacent issue slices require
+a new explicit Goal.
 
 ## Standard model stacks
 
@@ -145,8 +147,9 @@ so reloads do not abort live work. `minions_resume` revives a paused, failed, or
 completed worker while preserving its board identity; deliberately stopped workers
 remain non-resumable.
 
-The wrapper enforces six concurrent workers, twelve launches, and a hard handoff
-after eight triaged results per run. Implementer and architect launches require an
+The wrapper enforces six concurrent workers and twelve launches. Eight triaged
+results trigger a soft gate that accepts only `budgetClass: "closure"` work; twelve
+results trigger the hard handoff. Implementer and architect launches require an
 explicit linked Git worktree; the runtime rejects a primary checkout before
 spawning. Worker usage is credited exactly once through `minions_read`, with
 `minions_close` flushing unread completion usage. Missed notifications are

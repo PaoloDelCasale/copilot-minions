@@ -13,6 +13,8 @@ Use native Codex subagents only; never launch nested `codex exec` processes.
 
 Spawn named agents for independent tasks and wait for the batch. Never exceed six
 in-flight workers. Triage STATUS, update the board, and launch newly unblocked work.
+After the soft triage gate, add `Budget class: closure` to each permitted worker
+prompt and reject normal or newly scoped tasks; stop all dispatch at the hard gate.
 Use `/agent` for user-facing thread inspection.
 
 The frontier asks one decision at a time through the current client's structured

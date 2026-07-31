@@ -13,9 +13,9 @@ Done when: <observable criteria>
 Out of scope: <adjacent work>
 Fixed point: <branch/SHA or discovery pending>
 Verify: <canonical commands or discovery pending>
-Triage: <worker results>/8
+Triage: <worker results>/12 (soft closure at 8)
 Workers: <launched>/12
-Lifecycle: active | draining | handoff | closed
+Lifecycle: active | closure | draining | handoff | closed
 ```
 
 Counters are mandatory state. Increment Triage per worker result, not per read call,
@@ -36,7 +36,7 @@ Keep done and cancelled rows until close.
 Phases:
 
 ```text
-implement -> review -> fix -> review ... -> gate -> commit -> done
+implement -> review -> fix -> review ... -> gate -> commit -> landing -> done
 ```
 
 The inbox is an abstraction. The platform adapter explains how worker results arrive,

@@ -14,8 +14,10 @@ Map core roles to installed custom agents:
 
 Ask Codex to spawn the named agents for independent tasks and wait for the batch.
 Never exceed six in-flight workers. Triage the returned STATUS summaries, update the
-board, and launch newly unblocked work. Use `/agent` only as a user-facing way to
-inspect or switch threads; steer, stop, and close agents through native session
+board, and launch newly unblocked work. After the soft triage gate, add
+`Budget class: closure` to each permitted worker prompt and reject normal or newly
+scoped tasks; stop all dispatch at the hard gate. Use `/agent` only as a user-facing
+way to inspect or switch threads; steer, stop, and close agents through native session
 controls.
 
 The frontier asks exactly one decision and waits. Use a structured interaction tool

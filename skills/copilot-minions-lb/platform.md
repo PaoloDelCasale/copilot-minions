@@ -15,6 +15,8 @@ Pin the low-budget model and reasoning effort from [`models.md`](models.md). Eve
 spawn uses `mode: "background"`. Launch at most six independent workers.
 
 After launching, end the turn. On notification, call `read_agent`, triage STATUS,
-update the board, and dispatch the next phase. The frontier uses `ask_user` for one
-decision at a time; workers return `NEEDS_USER_INPUT` instead.
+update the board, and dispatch the next phase. After the soft triage gate, add
+`Budget class: closure` to each permitted worker prompt and reject normal or newly
+scoped tasks; stop all dispatch at the hard gate. The frontier uses `ask_user` for
+one decision at a time; workers return `NEEDS_USER_INPUT` instead.
 

@@ -13,6 +13,11 @@ const Role = StringEnum([
   "planner",
 ] as const);
 
+const BudgetClass = StringEnum(["normal", "closure"] as const, {
+  description: "Use closure only for already-boarded fix, review, gate, commit, or landing work after the soft triage limit.",
+  default: "normal",
+});
+
 export const schemas = {
   start: Type.Object({
     variant: StringEnum(["standard", "lb"] as const, {
@@ -24,6 +29,7 @@ export const schemas = {
     tasks: Type.Array(Type.Object({
       role: Role,
       task: Type.String({ description: "Complete bounded worker prompt, including STATUS contract." }),
+      budgetClass: Type.Optional(BudgetClass),
       cwd: Type.Optional(Type.String({ description: "Absolute repository or worktree path." })),
       routeOverride: Type.Optional(StringEnum([
         "mechanical-judgment",

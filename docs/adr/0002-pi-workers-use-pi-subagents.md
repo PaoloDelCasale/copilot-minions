@@ -26,7 +26,7 @@ Minions continues to own:
 
 - provider affinity and exact role/model/thinking matrices;
 - worker IDs, board mapping, six-worker concurrency, twelve launches, and the
-  eight-result triage budget;
+  soft-eight/hard-twelve triage budget with closure-only continuation;
 - explicit discipline selection with inline fallback;
 - linked-worktree validation for implementation writers;
 - parent frontier model locking and restoration.

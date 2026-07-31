@@ -110,8 +110,10 @@ AGENTS="${MINIONS_HOME}/.codex/agents"
 [[ -f "${COPILOT_SKILL}/control.md" ]]
 [[ -f "${CODEX_SKILL}/control.md" ]]
 [[ -f "${PI_SKILL}/control.md" ]]
-grep -Fq 'Triage: 8/8' "${PI_SKILL}/control.md"
+grep -Fq 'Triage: 8/12' "${PI_SKILL}/control.md"
+grep -Fq 'Triage: 12/12' "${PI_SKILL}/control.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
+grep -Fq 'budgetClass: "closure"' "${PI_SKILL}/platform.md"
 [[ -f "${PI_EXTENSION}/index.ts" ]]
 [[ -f "${PI_AGENTS}/pi-minions-reviewer.md" ]]
 [[ -f "${PI_AGENTS}/pi-minions-review-axis.md" ]]

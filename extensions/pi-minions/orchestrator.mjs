@@ -11,8 +11,11 @@ const SUBAGENTS_RPC_REQUEST = "subagents:rpc:v1:request";
 const SUBAGENTS_RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:";
 const SUBAGENTS_ASYNC_COMPLETE = "subagent:async-complete";
 const MAX_IN_FLIGHT = 6;
-const MAX_TRIAGED_RESULTS = 8;
+const SOFT_TRIAGED_RESULTS = 8;
+const MAX_TRIAGED_RESULTS = 12;
 const MAX_WORKER_LAUNCHES = 12;
+const BUDGET_CLASSES = new Set(["normal", "closure"]);
+const CLOSURE_ROLES = new Set(["mechanical", "implementer", "architect", "reviewer"]);
 const WRITER_ROLES = new Set(["implementer", "architect"]);
 const REQUIRED_RPC_METHODS = ["ping", "status", "spawn", "steer", "stop", "resume"];
 const ROLE_AGENTS = {
@@ -289,6 +292,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       role: worker.role,
       agent: worker.agent,
       task: worker.task,
+      budgetClass: worker.budgetClass,
       cwd: worker.cwd,
       provider: worker.provider,
       model: worker.model,
@@ -339,6 +343,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (!snapshot?.id || !snapshot?.subagentRunId || !ROLE_AGENTS[snapshot.role]) continue;
       workers.set(snapshot.id, {
         ...snapshot,
+        budgetClass: snapshot.budgetClass === "closure" ? "closure" : "normal",
         observedRunIds: new Set(snapshot.observedRunIds ?? []),
         triagedRunIds: new Set(snapshot.triagedRunIds ?? []),
       });
@@ -427,6 +432,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const matrix = PROVIDER_MATRICES[run.provider]?.[run.variant];
     const roleRoute = matrix?.routes[spec.role];
     if (!roleRoute) throw new Error(`Unknown worker role: ${spec.role}`);
+    const budgetClass = spec.budgetClass ?? "normal";
+    if (!BUDGET_CLASSES.has(budgetClass)) throw new Error(`Unknown worker budget class: ${budgetClass}`);
+    if (budgetClass === "closure" && !CLOSURE_ROLES.has(spec.role)) {
+      throw new Error(`The closure budget class is unavailable for role ${spec.role}.`);
+    }
     const route = spec.routeOverride ? matrix.overrides[spec.routeOverride] : roleRoute;
     if (!route) throw new Error(`Route override ${spec.routeOverride} is not available for ${run.variant}.`);
     const [defaultModel, thinking] = route;
@@ -447,6 +457,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       thinking,
       cwd,
       agent: ROLE_AGENTS[spec.role],
+      budgetClass,
       discipline,
       disciplineLoaded,
     };
@@ -480,6 +491,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       role: task.role,
       agent: route.agent,
       task: task.task,
+      budgetClass: route.budgetClass,
       cwd: route.cwd,
       provider: run.provider,
       model: route.modelId,
@@ -502,6 +514,15 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       applyCompletion(worker, early, ctx);
     }
     return worker;
+  }
+
+  function enforceTriageBudget(budgetClasses) {
+    if (run.triagedCount >= MAX_TRIAGED_RESULTS) {
+      throw new Error(`Pi minions reached its hard ${MAX_TRIAGED_RESULTS}-result triage limit; close and start a new orchestration run.`);
+    }
+    if (run.triagedCount >= SOFT_TRIAGED_RESULTS && budgetClasses.some((budgetClass) => budgetClass !== "closure")) {
+      throw new Error(`Pi minions reached its soft ${SOFT_TRIAGED_RESULTS}-result triage limit; only budgetClass closure work may continue.`);
+    }
   }
 
   function findWorkerBySubagentRunId(subagentRunId) {
@@ -649,9 +670,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (tasks.length === 0) throw new Error("At least one worker task is required.");
       const inFlight = [...run.workers.values()].filter((worker) => activeStatus(worker.status)).length;
       if (inFlight + tasks.length > MAX_IN_FLIGHT) throw new Error(`Pi minions allows at most ${MAX_IN_FLIGHT} in-flight workers.`);
-      if (run.triagedCount >= MAX_TRIAGED_RESULTS) {
-        throw new Error(`Pi minions reached its ${MAX_TRIAGED_RESULTS}-result triage budget; close and start a new orchestration run.`);
-      }
+      enforceTriageBudget(tasks.map((task) => task.budgetClass ?? "normal"));
       if (run.launchCount + tasks.length > MAX_WORKER_LAUNCHES) {
         throw new Error(`Pi minions allows at most ${MAX_WORKER_LAUNCHES} worker launches per orchestration run.`);
       }
@@ -773,9 +792,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       }
       const inFlight = [...run.workers.values()].filter((candidate) => activeStatus(candidate.status)).length;
       if (inFlight >= MAX_IN_FLIGHT) throw new Error(`Pi minions allows at most ${MAX_IN_FLIGHT} in-flight workers.`);
-      if (run.triagedCount >= MAX_TRIAGED_RESULTS) {
-        throw new Error(`Pi minions reached its ${MAX_TRIAGED_RESULTS}-result triage budget; close and start a new orchestration run.`);
-      }
+      enforceTriageBudget([worker.budgetClass]);
       if (run.launchCount >= MAX_WORKER_LAUNCHES) {
         throw new Error(`Pi minions reached its ${MAX_WORKER_LAUNCHES}-launch worker budget.`);
       }

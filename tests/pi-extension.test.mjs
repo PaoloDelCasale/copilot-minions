@@ -283,6 +283,12 @@ test("the extension registers TypeBox schemas for every public Minions tool", ()
   assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
     tasks: [{ role: "explorer", task: "Inspect", timeoutSeconds: 30 }],
   }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
+    tasks: [{ role: "reviewer", task: "Final review", budgetClass: "closure" }],
+  }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
+    tasks: [{ role: "reviewer", task: "Invalid", budgetClass: "unbounded" }],
+  }), false);
   assert.equal(Value.Check(harness.tools.get("minions_resume").parameters, {
     workerId: "worker-1",
     message: "Continue",
@@ -379,6 +385,7 @@ test("spawn delegates to the namespaced agent with qualified model, timeout, and
     },
   });
   assert.equal(result.details.workers[0].disciplineLoaded, true);
+  assert.equal(result.details.workers[0].budgetClass, "normal");
   assert.match(result.content[0].text, /persistent worker/);
 });
 
@@ -483,32 +490,66 @@ test("named escalation routes retain their exact model and effort", async () => 
   assert.equal(harness.runtime.byMethod("spawn")[0].params.model, "openai-codex/gpt-5.6-sol:max");
 });
 
-test("the wrapper enforces six concurrent workers and the eight-result triage handoff", async () => {
+test("the wrapper enforces six concurrent workers", async () => {
   const harness = createHarness();
   await start(harness);
-  const paused = await spawn(harness, [{ role: "reviewer", task: "Pause me" }]);
+  const paused = await spawn(harness, [{ role: "reviewer", task: "Pause me", budgetClass: "closure" }]);
   const pausedWorker = paused.details.workers[0];
   harness.runtime.complete(pausedWorker.subagentRunId, { success: false, state: "paused", summary: "Need another pass" });
-  const six = Array.from({ length: 6 }, (_, index) => ({ role: "explorer", task: `Explore ${index}` }));
-  const live = await spawn(harness, six);
+  const live = await spawn(harness, Array.from({ length: 6 }, (_, index) => ({ role: "explorer", task: `Explore ${index}` })));
   await assert.rejects(execute(harness.tools.get("minions_resume"), {
     workerId: pausedWorker.id,
     message: "Resume despite full live capacity",
   }, harness.ctx), /at most 6 in-flight/);
   assert.equal(harness.runtime.byMethod("resume").length, 0);
-
   for (const worker of live.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
-  const eighth = await spawn(harness, [{ role: "planner", task: "Eighth result" }]);
-  harness.runtime.complete(eighth.details.workers[0].subagentRunId, { summary: "done" });
+});
+
+test("the soft triage handoff permits only closure work until the hard limit", async () => {
+  const harness = createHarness();
+  await start(harness);
+  await assert.rejects(spawn(harness, [{ role: "explorer", task: "Misclassified", budgetClass: "closure" }]), /closure budget class.*role/i);
+
+  const closurePaused = await spawn(harness, [{ role: "reviewer", task: "Final review", budgetClass: "closure" }]);
+  const normalPaused = await spawn(harness, [{ role: "reviewer", task: "Ordinary review" }]);
+  for (const worker of [closurePaused.details.workers[0], normalPaused.details.workers[0]]) {
+    harness.runtime.complete(worker.subagentRunId, { success: false, state: "paused", summary: "Need another pass" });
+  }
+  const six = await spawn(harness, Array.from({ length: 6 }, (_, index) => ({ role: "explorer", task: `Explore ${index}` })));
+  for (const worker of six.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
   await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+
+  const spawnCallsAtSoftLimit = harness.runtime.byMethod("spawn").length;
+  await assert.rejects(spawn(harness, [{ role: "planner", task: "New scope" }]), /soft 8-result triage limit.*closure/i);
+  assert.equal(harness.runtime.byMethod("spawn").length, spawnCallsAtSoftLimit);
   await assert.rejects(execute(harness.tools.get("minions_resume"), {
-    workerId: pausedWorker.id,
-    message: "Resume after triage handoff",
-  }, harness.ctx), /8-result triage budget/);
-  assert.equal(harness.runtime.byMethod("resume").length, 0);
-  const spawnCalls = harness.runtime.byMethod("spawn").length;
-  await assert.rejects(spawn(harness, [{ role: "planner", task: "Ninth result" }]), /8-result triage budget/);
-  assert.equal(harness.runtime.byMethod("spawn").length, spawnCalls);
+    workerId: normalPaused.details.workers[0].id,
+    message: "Continue ordinary work",
+  }, harness.ctx), /soft 8-result triage limit.*closure/i);
+
+  const resumed = await execute(harness.tools.get("minions_resume"), {
+    workerId: closurePaused.details.workers[0].id,
+    message: "Finish the closure review",
+  }, harness.ctx);
+  assert.equal(resumed.details.worker.budgetClass, "closure");
+  harness.runtime.complete(resumed.details.worker.subagentRunId, { summary: "approved" });
+  await execute(harness.tools.get("minions_read"), { workerIds: [resumed.details.worker.id] }, harness.ctx);
+
+  const final = await spawn(harness, Array.from({ length: 3 }, (_, index) => ({
+    role: "mechanical",
+    task: `Landing ${index}`,
+    budgetClass: "closure",
+  })));
+  for (const worker of final.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "landed" });
+  await execute(harness.tools.get("minions_read"), { workerIds: final.details.workers.map((worker) => worker.id) }, harness.ctx);
+
+  const callsAtHardLimit = harness.runtime.byMethod("spawn").length;
+  await assert.rejects(spawn(harness, [{ role: "mechanical", task: "Too late", budgetClass: "closure" }]), /hard 12-result triage limit/i);
+  assert.equal(harness.runtime.byMethod("spawn").length, callsAtHardLimit);
+  await assert.rejects(execute(harness.tools.get("minions_resume"), {
+    workerId: normalPaused.details.workers[0].id,
+    message: "Too late",
+  }, harness.ctx), /hard 12-result triage limit/i);
 });
 
 test("the wrapper enforces the twelve-launch worker budget even when results are unread", async () => {
@@ -694,7 +735,7 @@ test("a failed model restore leaves the orchestration active", async () => {
 test("reload preserves active package-owned runs instead of aborting them", async () => {
   const first = createHarness();
   await start(first);
-  const spawned = await spawn(first, [{ role: "explorer", task: "Long inspection" }]);
+  const spawned = await spawn(first, [{ role: "reviewer", task: "Long final review", budgetClass: "closure" }]);
   first.handlers.get("session_shutdown")({ reason: "reload" }, first.ctx);
   const saved = [...first.sessionEntries];
   assert.equal(first.events.handlers.get(ASYNC_COMPLETE)?.size ?? 0, 0);
@@ -704,7 +745,9 @@ test("reload preserves active package-owned runs instead of aborting them", asyn
   const startAgain = await start(second);
 
   assert.match(startAgain.content[0].text, /already active/);
-  assert.equal(saved.filter((entry) => entry.customType === "pi-minions-state").at(-1).data.workers[0].subagentRunId, spawned.details.workers[0].subagentRunId);
+  const savedWorker = saved.filter((entry) => entry.customType === "pi-minions-state").at(-1).data.workers[0];
+  assert.equal(savedWorker.subagentRunId, spawned.details.workers[0].subagentRunId);
+  assert.equal(savedWorker.budgetClass, "closure");
   assert.equal(first.runtime.byMethod("stop").length, 0);
 });
 
