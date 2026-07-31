@@ -1,7 +1,7 @@
 # copilot-minions
 
 Multi-platform orchestration skills for **GitHub Copilot CLI**, **OpenAI Codex**,
-and **Pi**. A dispatch-only frontier coordinates bounded workers through a shared
+**Pi**, and **Paseo-hosted Pi**. A dispatch-only frontier coordinates bounded workers through a shared
 board and STATUS protocol. Workers implement, explore, review, plan, and run commands
 in isolated worktrees.
 
@@ -13,8 +13,11 @@ The methodology is shared; only platform capabilities differ:
 - Pi delegates persistent background workers through the versioned event-bus RPC
   exposed by [`pi-subagents`](https://github.com/nicobailon/pi-subagents), while
   retaining Minions provider affinity, role routing, budgets, and board identity.
+- When Pi runs as a Paseo agent, the same extension selects Paseo's agent-scoped MCP
+  instead. Workers are native Paseo child agents, visible in its subagent track, and
+  Paseo owns their lifecycle, activity, persistence, usage, and notifications.
 
-Codex and Pi support are **beta** until their authenticated release gates pass.
+Codex, Pi, and Paseo support are **beta** until their authenticated release gates pass.
 
 ## Install
 
@@ -34,6 +37,7 @@ Select a platform explicitly:
 ./install.ps1 -Platform copilot
 ./install.ps1 -Platform codex
 ./install.ps1 -Platform pi
+./install.ps1 -Platform paseo
 ./install.ps1 -Platform all
 ```
 
@@ -41,6 +45,7 @@ Select a platform explicitly:
 ./install.sh --platform copilot
 ./install.sh --platform codex
 ./install.sh --platform pi
+./install.sh --platform paseo
 ./install.sh --platform all
 ```
 
@@ -69,12 +74,18 @@ Destinations:
 | Codex LB | `~/.agents/skills/codex-minions-lb` | `~/.codex/agents/codex-minions-lb-*.toml` |
 | Pi | `~/.pi/agent/skills/pi-minions` | Extension plus agents under `~/.pi/agent/{extensions,agents}` |
 | Pi LB | `~/.pi/agent/skills/pi-minions-lb` | Same shared extension and agents |
+| Paseo + Pi | Same Pi skills (`paseo-minions` is an alias) | Native Paseo child agents through MCP |
 
 Codex installation requires `codex` on `PATH` and runs `codex debug models` before
 writing files. It requires Sol and Luna, plus Terra for the standard variant. Pi
-installation requires `pi` on `PATH` and installs the pinned
-`npm:pi-subagents@0.37.2` package without requiring model availability. Set
-`PI_SUBAGENTS_PACKAGE` only when deliberately testing another compatible package
+Pi and Paseo installation require `pi` on `PATH` without requiring model
+availability. `-Platform pi` installs pinned `npm:pi-subagents@0.37.2`;
+`-Platform paseo` installs pinned `npm:pi-mcp-adapter@2.16.0`; `all` installs both.
+The MCP adapter is the bridge Paseo probes before injecting its agent-scoped
+`create_agent` control plane into Pi. A Paseo-hosted session fails closed
+instead of falling back to invisible `pi-subagents` workers when that bridge is absent;
+run the Paseo platform installer and reopen the Paseo agent. Set
+`PI_SUBAGENTS_PACKAGE` or `PI_MCP_ADAPTER_PACKAGE` only when deliberately testing another compatible package
 version. Pi validates the active provider's exact model routes when an orchestration
 run starts. `all` preflights and stages every platform before replacing any Minions
 installation.
@@ -87,7 +98,7 @@ managed Pi/Codex resources and refuses to overwrite a user-owned collision.
 
 Standard triggers: `orchestrate`, `go build it`, `minions on`, and planning-to-build
 flows. Platform names are explicit: `copilot-minions`, `codex-minions`, and
-`pi-minions`.
+`pi-minions`; Paseo-hosted Pi also accepts the `paseo-minions` alias.
 Low-budget variants trigger on `orchestrate low budget`, `minions lb`, or their
 explicit names.
 
@@ -127,7 +138,7 @@ Sol and Terra routes stay unchanged:
 
 See each platform overlay's `models.md` and `skills/core/model-rationale.md`.
 
-### Pi provider affinity
+### Pi provider affinity and Paseo runtime selection
 
 Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
@@ -139,13 +150,17 @@ is missing; there is no cross-provider or availability fallback. Installation do
 not require those models to be available. Closing the run restores the parent's
 original model and thinking level.
 
-Workers use namespaced `pi-subagents` agents and explicit provider-qualified model
-routes. `pi-subagents` owns process lifecycle, FleetView, artifacts, session recovery,
-supervisor communication, steering, timeout enforcement, and completion
-notifications. Minions persists its mapping from board worker IDs to package run IDs,
-so reloads do not abort live work. `minions_resume` revives a paused, failed, or
-completed worker while preserving its board identity; deliberately stopped workers
-remain non-resumable.
+Outside Paseo, workers use namespaced `pi-subagents` agents and explicit
+provider-qualified model routes. `pi-subagents` owns process lifecycle, FleetView,
+artifacts, session recovery, supervisor communication, steering, timeout enforcement,
+and completion notifications. In a Paseo agent-scoped session, Minions discovers the
+injected `/mcp/agents` endpoint, creates `pi/<provider>/<model>` native child agents,
+and projects Paseo status, recent activity, token/cost usage, cancellation, and
+follow-up runs onto the same `minions_*` interface. Paseo keeps one native agent ID
+while Minions assigns a new execution ID to each resumed run so launch and triage
+budgets remain exact. Minions persists both IDs across reloads. Deliberately stopped
+workers remain non-resumable. Paseo-managed workers currently reject
+`timeoutSeconds` because Paseo 0.2.5 does not expose a persistent child deadline.
 
 The wrapper enforces six concurrent workers and twelve launches. Eight triaged
 results trigger a soft gate that accepts only `budgetClass: "closure"` work; twelve
@@ -196,7 +211,8 @@ skills/
   pi-minions/              Pi entrypoint and RPC adapter
   pi-minions-lb/           Pi low-budget entrypoint and RPC adapter
 extensions/
-  pi-minions/              Provider-affine adapter over pi-subagents RPC v1
+  pi-minions/              Provider-affine runtime seam for pi-subagents and Paseo
+    paseo-runtime.mjs      Paseo MCP discovery, transport, and lifecycle adapter
     agents/                Managed Pi role agents and two-axis review leaf
 ```
 
@@ -246,11 +262,12 @@ macOS.
 
 ## Release
 
-The dual-platform change lands as one backward-compatible PR. The first `v0.1.0`
+Platform changes land as backward-compatible PRs. The first `v0.1.0`
 release is gated on a manual authenticated Codex run confirming the required model
 IDs and a real native-subagent orchestration cycle. Pi remains beta until real
 `pi-subagents` orchestration and resume runs pass with both `openai-codex` and
-`github-copilot`.
+`github-copilot`. Paseo support additionally requires an authenticated Paseo-hosted
+Pi run covering native child visibility, completion notification, stop, and follow-up.
 
 ## License
 

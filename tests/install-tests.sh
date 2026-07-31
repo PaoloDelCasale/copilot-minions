@@ -119,6 +119,11 @@ grep -Fq 'budgetClass: "closure"' "${PI_SKILL}/platform.md"
 [[ -f "${PI_AGENTS}/pi-minions-review-axis.md" ]]
 [[ "$(count_files "${PI_AGENTS}"/pi-minions-*.md)" -eq 7 ]]
 grep -Fxq 'npm:pi-subagents@0.37.2' "${MINIONS_TEST_PI_INSTALL_LOG}"
+grep -Fxq 'npm:pi-mcp-adapter@2.16.0' "${MINIONS_TEST_PI_INSTALL_LOG}"
+: > "${MINIONS_TEST_PI_INSTALL_LOG}"
+bash "${ROOT}/install.sh" --platform paseo >/dev/null
+grep -Fxq 'npm:pi-mcp-adapter@2.16.0' "${MINIONS_TEST_PI_INSTALL_LOG}"
+! grep -Fq 'pi-subagents' "${MINIONS_TEST_PI_INSTALL_LOG}"
 [[ -f "${COPILOT_SKILL}/platform.md" ]]
 [[ -f "${CODEX_SKILL}/platform.md" ]]
 grep -Eq 'mechanical.*grok-4\.5.*high' "${COPILOT_SKILL}/models.md"

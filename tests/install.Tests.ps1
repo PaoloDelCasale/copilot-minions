@@ -114,6 +114,12 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $piAgents 'pi-minions-review-axis.md')) 'Pi two-axis leaf reviewer is installed'
     Assert-True (@(Get-ChildItem -LiteralPath $piAgents -Filter 'pi-minions-*.md').Count -eq 7) 'Seven Pi custom agents are installed'
     Assert-True ((Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw).Contains('npm:pi-subagents@0.37.2')) 'Pinned pi-subagents runtime is installed'
+    Assert-True ((Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw).Contains('npm:pi-mcp-adapter@2.16.0')) 'Pinned Paseo MCP bridge is installed'
+    Clear-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG
+    & (Join-Path $root 'install.ps1') -Platform paseo | Out-Null
+    $paseoInstallLog = Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw
+    Assert-True ($paseoInstallLog.Contains('npm:pi-mcp-adapter@2.16.0')) 'Paseo platform installs its MCP bridge'
+    Assert-True (-not $paseoInstallLog.Contains('pi-subagents')) 'Paseo platform does not install the ordinary Pi worker runtime'
     Assert-True (Test-Path (Join-Path $copilotSkill 'platform.md')) 'Copilot contains adapter'
     Assert-True (Test-Path (Join-Path $codexSkill 'platform.md')) 'Codex contains adapter'
     Assert-True ((Get-Content (Join-Path $copilotSkill 'models.md') -Raw) -match 'mechanical.*grok-4\.5.*high') 'Copilot gets its provider matrix'

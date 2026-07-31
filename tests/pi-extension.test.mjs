@@ -308,6 +308,13 @@ test("start verifies pi-subagents RPC v1 before locking the frontier route", asy
   assert.deepEqual(harness.thinkingChanges, ["medium"]);
 });
 
+test("a Paseo-hosted Pi session fails closed when its MCP bridge was not injected", async () => {
+  const harness = createHarness({ dependencies: { paseoHosted: true, paseoRuntime: null } });
+  await assert.rejects(start(harness), /agent-scoped MCP runtime is unavailable.*pi-mcp-adapter/i);
+  assert.equal(harness.runtime.byMethod("ping").length, 0);
+  assert.equal(harness.modelChanges.length, 0);
+});
+
 test("start rejects an incompatible pi-subagents runtime without changing model", async () => {
   const harness = createHarness({
     runtimeOptions: {
@@ -778,8 +785,13 @@ test("Pi aliases and the system prompt keep top-level dispatch on Minions", () =
     source: "user",
     text: "/skill:codex-minions build this",
   });
+  const paseoAlias = harness.handlers.get("input")({
+    source: "user",
+    text: "/skill:paseo-minions-lb build this cheaply",
+  });
   const prompt = harness.handlers.get("before_agent_start")({ systemPrompt: "base" }, harness.ctx);
   assert.equal(transformed.text, "/skill:pi-minions build this");
+  assert.equal(paseoAlias.text, "/skill:pi-minions-lb build this cheaply");
   assert.match(prompt.systemPrompt, /never call the generic subagent tool directly/i);
   assert.match(prompt.systemPrompt, /subagent_supervisor/);
 });
@@ -794,4 +806,87 @@ test("review workers load Matt's code-review discipline and use the nested-capab
   const params = harness.runtime.byMethod("spawn")[0].params;
   assert.equal(params.agent, "pi-minions-reviewer");
   assert.equal(params.skill, "code-review");
+});
+
+test("Paseo sessions use native child agents without dispatching pi-subagents", async () => {
+  const calls = [];
+  let execution = 1;
+  let state = "running";
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") {
+        return { runtime: "paseo", methods: ["ping", "status", "spawn", "steer", "stop", "resume"] };
+      }
+      if (method === "spawn") {
+        return {
+          details: {
+            asyncId: `paseo:child-1:execution-${execution++}`,
+            runtimeAgentId: "child-1",
+          },
+        };
+      }
+      if (method === "status") {
+        return {
+          text: `State: ${state}`,
+          details: state === "complete" ? {
+            completion: {
+              id: params.runId,
+              runId: params.runId,
+              state: "complete",
+              success: true,
+              summary: "Paseo child finished",
+              totalTokens: { input: 10, cacheRead: 3, output: 2, total: 15 },
+              totalCost: { inputTokens: 10, outputTokens: 2, costUsd: 0.02 },
+            },
+          } : {},
+        };
+      }
+      if (method === "resume") {
+        return {
+          details: {
+            asyncId: `paseo:child-1:execution-${execution++}`,
+            runtimeAgentId: "child-1",
+          },
+        };
+      }
+      if (method === "steer") return { text: "Prompt sent." };
+      if (method === "stop") return { state: "stopping" };
+      throw new Error(`Unexpected Paseo method: ${method}`);
+    },
+  };
+  const harness = createHarness({ dependencies: { paseoRuntime } });
+  const started = await start(harness);
+  assert.equal(started.details.runtime, "paseo");
+  assert.match(started.content[0].text, /Paseo native agents/);
+  assert.equal(harness.runtime.byMethod("ping").length, 0);
+
+  const spawned = await spawn(harness, [{ role: "explorer", task: "Inspect" }]);
+  const worker = spawned.details.workers[0];
+  assert.equal(worker.runtimeAgentId, "child-1");
+  const persisted = harness.appendedEntries.at(-1).data;
+  assert.equal(persisted.runtime, "paseo");
+  assert.equal(persisted.workers[0].runtimeAgentId, "child-1");
+  assert.equal(harness.runtime.byMethod("spawn").length, 0);
+  assert.equal(calls.find((call) => call.method === "spawn").params.model, "openai-codex/gpt-5.6-luna:high");
+
+  state = "complete";
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.details.workers[0].status, "done");
+  assert.match(read.content[0].text, /Paseo child finished/);
+  assert.equal(read.usage.cacheRead, 3);
+  assert.equal(read.usage.totalTokens, 15);
+  const statusCall = calls.find((call) => call.method === "status");
+  assert.equal(statusCall.params.id, "child-1");
+  assert.equal(statusCall.params.runId, worker.subagentRunId);
+
+  const resumed = await execute(harness.tools.get("minions_resume"), {
+    workerId: worker.id,
+    message: "Continue",
+  }, harness.ctx);
+  assert.equal(resumed.details.worker.runtimeAgentId, "child-1");
+  assert.notEqual(resumed.details.worker.subagentRunId, worker.subagentRunId);
+  const resumeCall = calls.find((call) => call.method === "resume");
+  assert.equal(resumeCall.params.id, "child-1");
 });
