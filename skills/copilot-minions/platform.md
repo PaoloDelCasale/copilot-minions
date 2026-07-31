@@ -18,6 +18,8 @@ six in-flight workers.
 After launching background work, end the turn. On completion notification, call
 `read_agent`, read the STATUS and concise result, update the board, and dispatch the
 next phase. Use the returned agent ID for board Notes, steering, and stopping.
+After the soft triage gate, add `Budget class: closure` to each permitted worker
+prompt and reject every normal or newly scoped task; stop all dispatch at the hard gate.
 
 The frontier uses `ask_user` for exactly one decision at a time. Workers never call
 `ask_user`; they return `STATUS: NEEDS_USER_INPUT`.

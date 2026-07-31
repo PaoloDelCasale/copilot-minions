@@ -44,7 +44,9 @@ contract before decomposition and apply its pre-spawn checks before every dispat
 4. Batch independent tasks; never parallelize dependent writes.
 5. Triage each worker result through the STATUS protocol and increment the Triage
    counter once per worker result.
-6. At eight triaged results, stop dispatching, drain in-flight work, post the full
+6. At eight triaged results, enter closure mode and dispatch only already-boarded
+   fix, review, gate, commit, or landing tasks using the adapter's closure classification.
+7. At twelve triaged results, stop dispatching, drain in-flight work, post the full
    handoff packet, and close the orchestration run.
 
 A broad request to continue does not silently expand the Goal. When the current

@@ -13,7 +13,7 @@ Done when: <observable completion criteria>
 Out of scope: <adjacent work not authorized>
 Fixed point: <branch/SHA or discovery pending>
 Verify contract: <canonical commands or discovery pending>
-Triage budget: 0/8 worker results
+Triage budget: 0/8 soft; 0/12 hard
 Worker budget: 0/12 launches
 Lifecycle: active
 ```
@@ -38,8 +38,9 @@ Spawn a task only when every applicable check passes:
 5. **Verification** - implementation and gate tasks have canonical commands and
    known environment requirements.
 6. **Routing** - role and route override match [`models.md`](models.md).
-7. **Budget** - fewer than eight worker results have been triaged and fewer than
-   twelve workers have been launched in this orchestration run.
+7. **Budget** - fewer than twelve worker results have been triaged and fewer than
+   twelve workers have been launched. At eight or more triaged results, the task must
+   be already-boarded closure work and be marked as closure through the platform adapter.
 
 If a check fails, do not spawn. Update the board, ask one user question when needed,
 or prepare a handoff.
@@ -52,10 +53,27 @@ or prepare a handoff.
 - Show both counters in every full board and status response.
 - Batching results never collapses multiple workers into one triage event.
 
+## Soft closure gate
+
+At `Triage: 8/12`, mark the lifecycle `closure` and stop expanding the run. Do not
+start discovery, planning, setup, a new implementation slice, or adjacent work.
+Only already-boarded tasks in `fix`, `review`, `gate`, `commit`, or `landing` may
+continue, and every spawn must use the platform adapter's closure classification.
+
+Closure routing is deliberately narrow:
+
+- `fix` -> `implementer` or `architect`;
+- `review` -> `reviewer`;
+- `gate`, `commit`, or `landing` -> `mechanical`.
+
+Platform adapters reject or prohibit normal spawns and resumes after the soft gate.
+A resumed worker inherits the class recorded at its original spawn. The six-worker
+concurrency and twelve-launch limits remain unchanged.
+
 ## Hard handoff
 
-At `Triage: 8/8`, stop dispatching. Do not start a ninth post-triage task in the
-same parent session.
+At `Triage: 12/12`, stop dispatching. Do not start a thirteenth post-triage task in
+the same parent session.
 
 1. Let already in-flight workers finish, or stop them if the user requests it.
 2. Read and triage their results without dispatching replacements.
@@ -65,7 +83,7 @@ same parent session.
 
 The handoff packet contains Goal, decisions, all board rows, branches, worktrees,
 `based-on:` and `fixed:` SHAs, commits, verification results, unresolved concerns,
-and the next unblocked task. Counters may exceed eight only while draining workers
+and the next unblocked task. Counters may exceed twelve only while draining workers
 that were already in flight.
 
 ## Scope completion

@@ -1,7 +1,7 @@
 ---
 name: pi-minions
 description: >-
-  Orchestrator for Pi using background RPC workers. Use in Pi when the user says
+  Orchestrator for Pi using persistent pi-subagents workers. Use in Pi when the user says
   "orchestrate", "go build it", "minions on", or "pi-minions", asks for parallel
   agent work, or runs a grill-to-build or planning-to-issues flow. Opt out with
   "/direct", "skip minions", or "skip workers".

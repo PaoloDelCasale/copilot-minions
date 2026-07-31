@@ -1,7 +1,7 @@
 ---
 name: pi-minions-lb
 description: >-
-  Low-budget orchestrator for Pi using background RPC workers. Use in Pi when the
+  Low-budget orchestrator for Pi using persistent pi-subagents workers. Use in Pi when the
   user says "orchestrate low budget", "minions lb", or "pi-minions-lb". Opt out
   with "/direct", "skip minions", or "skip workers".
 ---

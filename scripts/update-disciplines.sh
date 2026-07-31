@@ -15,10 +15,20 @@ case "${PLATFORM}" in
 esac
 
 REPO_URL="https://github.com/mattpocock/skills.git"
-REF="${REF:-main}"
+REF="${REF:-2ab958093e83e0ec752e6c1c5932da465bf23e0c}"
 INSTALL_HOME="${MINIONS_HOME:-$HOME}"
 CACHE_DIR="${CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/copilot-minions/mattpocock-skills}"
-DISCIPLINES=(implement to-spec to-tickets)
+DISCIPLINES=(
+  "implement:engineering/implement"
+  "to-spec:engineering/to-spec"
+  "to-tickets:engineering/to-tickets"
+  "tdd:engineering/tdd"
+  "code-review:engineering/code-review"
+  "diagnosing-bugs:engineering/diagnosing-bugs"
+  "codebase-design:engineering/codebase-design"
+  "domain-modeling:engineering/domain-modeling"
+  "grilling:productivity/grilling"
+)
 
 selected() {
   [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]
@@ -35,12 +45,14 @@ fi
 
 if [[ -d "${CACHE_DIR}/.git" ]]; then
   echo "Updating source: ${CACHE_DIR}"
-  git -C "${CACHE_DIR}" fetch --quiet origin
-  git -C "${CACHE_DIR}" reset --hard --quiet "origin/${REF}"
+  git -C "${CACHE_DIR}" fetch --quiet --depth 1 origin "${REF}"
+  git -C "${CACHE_DIR}" reset --hard --quiet FETCH_HEAD
 else
   echo "Cloning source into: ${CACHE_DIR}"
   mkdir -p "$(dirname "${CACHE_DIR}")"
-  git clone --quiet --depth 1 --branch "${REF}" "${REPO_URL}" "${CACHE_DIR}"
+  git clone --quiet --filter=blob:none --no-checkout "${REPO_URL}" "${CACHE_DIR}"
+  git -C "${CACHE_DIR}" fetch --quiet --depth 1 origin "${REF}"
+  git -C "${CACHE_DIR}" checkout --quiet --detach FETCH_HEAD
 fi
 echo "Source at ${REF} @ $(git -C "${CACHE_DIR}" rev-parse --short HEAD)"
 
@@ -49,8 +61,10 @@ if selected copilot; then
   LIST_JSON="$(copilot skill list --json 2>/dev/null || echo '[]')"
 fi
 
-for discipline in "${DISCIPLINES[@]}"; do
-  source_dir="${CACHE_DIR}/skills/engineering/${discipline}"
+for entry in "${DISCIPLINES[@]}"; do
+  discipline="${entry%%:*}"
+  relative_path="${entry#*:}"
+  source_dir="${CACHE_DIR}/skills/${relative_path}"
   if [[ ! -d "${source_dir}" ]]; then
     echo "Warning: upstream no longer provides '${discipline}'; skipping." >&2
     continue

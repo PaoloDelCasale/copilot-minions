@@ -10,8 +10,9 @@ The methodology is shared; only platform capabilities differ:
 - Copilot spawns background `task` agents and reads completion notifications.
 - Codex spawns native subagents, uses managed custom agents, and exposes threads
   through `/agent`.
-- Pi runs managed background `pi --mode rpc` subprocesses with the provider selected
-  by the parent session.
+- Pi delegates persistent background workers through the versioned event-bus RPC
+  exposed by [`pi-subagents`](https://github.com/nicobailon/pi-subagents), while
+  retaining Minions provider affinity, role routing, budgets, and board identity.
 
 Codex and Pi support are **beta** until their authenticated release gates pass.
 
@@ -66,19 +67,21 @@ Destinations:
 | Copilot LB | `~/.copilot/skills/copilot-minions-lb` | Native Copilot agent types |
 | Codex | `~/.agents/skills/codex-minions` | `~/.codex/agents/codex-minions-*.toml` |
 | Codex LB | `~/.agents/skills/codex-minions-lb` | `~/.codex/agents/codex-minions-lb-*.toml` |
-| Pi | `~/.pi/agent/skills/pi-minions` | Shared extension in `~/.pi/agent/extensions/pi-minions` |
-| Pi LB | `~/.pi/agent/skills/pi-minions-lb` | Shared extension in `~/.pi/agent/extensions/pi-minions` |
+| Pi | `~/.pi/agent/skills/pi-minions` | Extension plus agents under `~/.pi/agent/{extensions,agents}` |
+| Pi LB | `~/.pi/agent/skills/pi-minions-lb` | Same shared extension and agents |
 
 Codex installation requires `codex` on `PATH` and runs `codex debug models` before
 writing files. It requires Sol and Luna, plus Terra for the standard variant. Pi
-installation requires `pi` on `PATH`; its provider-specific catalog is validated at
-orchestration start because availability depends on the active authenticated
-provider. `all` preflights and stages every platform before replacing any
+installation requires `pi` on `PATH` and installs the pinned
+`npm:pi-subagents@0.37.2` package without requiring model availability. Set
+`PI_SUBAGENTS_PACKAGE` only when deliberately testing another compatible package
+version. Pi validates the active provider's exact model routes when an orchestration
+run starts. `all` preflights and stages every platform before replacing any Minions
 installation.
 
-The six Codex agent files are namespaced and carry a managed marker. Pi skills and
-the shared extension also carry managed markers. The installer updates only managed
-Pi/Codex resources and refuses to overwrite a user-owned collision.
+The six Codex and seven Pi agent files are namespaced and carry managed markers. Pi
+skills and the shared extension are managed as well. The installer updates only
+managed Pi/Codex resources and refuses to overwrite a user-owned collision.
 
 ## Usage
 
@@ -92,8 +95,10 @@ Opt out with `/direct`, `skip minions`, or `skip workers`.
 
 Each orchestration run declares one bounded Goal, completion criteria, out-of-scope
 work, fixed point, verification contract, and worker/triage budgets. After eight
-worker results the frontier stops dispatching, drains in-flight work, posts a full
-handoff, and closes the run. Adjacent issue slices require a new explicit Goal.
+worker results the frontier enters closure mode and permits only already-boarded fix,
+review, gate, commit, or landing work. At twelve results it stops dispatching, drains
+in-flight work, posts a full handoff, and closes the run. Adjacent issue slices require
+a new explicit Goal.
 
 ## Standard model stacks
 
@@ -128,21 +133,28 @@ Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
 `<provider>/gpt-5.6-sol:medium`; workers use that provider's matrix while every model
 is qualified with the same provider. Required-model preflight and route lookup are
-provider-specific. The installers and runtime require exact catalog IDs—including
-`github-copilot/grok-4.5`—and direct users to upgrade Pi when a route is missing;
-there is no cross-provider or availability fallback. Closing the run restores the
-parent's original model and thinking level.
+provider-specific. At orchestration start, the runtime requires exact catalog
+IDs—including `github-copilot/grok-4.5`—and directs users to upgrade Pi when a route
+is missing; there is no cross-provider or availability fallback. Installation does
+not require those models to be available. Closing the run restores the parent's
+original model and thinking level.
 
-Pi renders a responsive worker-usage table above the editor with one row per active
-worker and at most seven lines total. Rows show a stable worker alias, role, routed
-model, grouped tokens, cost, and elapsed time when width permits; the summary shows
-combined parent-and-worker Session Usage. Terminal workers leave the table and emit
-short aggregated notifications. Lifecycle snapshots remain diagnostic across reloads,
-but interrupted workers are not rendered or treated as resumable because worker
-subprocesses stay ephemeral. Worker usage is accounted exactly once through reads,
-with close flushing any remainder. Completion notifications interrupt a busy frontier;
-the frontier ends its turn after spawning instead of polling. Spawn tasks may also set
-`timeoutSeconds` for an orchestrator-enforced hard deadline.
+Workers use namespaced `pi-subagents` agents and explicit provider-qualified model
+routes. `pi-subagents` owns process lifecycle, FleetView, artifacts, session recovery,
+supervisor communication, steering, timeout enforcement, and completion
+notifications. Minions persists its mapping from board worker IDs to package run IDs,
+so reloads do not abort live work. `minions_resume` revives a paused, failed, or
+completed worker while preserving its board identity; deliberately stopped workers
+remain non-resumable.
+
+The wrapper enforces six concurrent workers and twelve launches. Eight triaged
+results trigger a soft gate that accepts only `budgetClass: "closure"` work; twelve
+results trigger the hard handoff. Implementer and architect launches require an
+explicit linked Git worktree; the runtime rejects a primary checkout before
+spawning. Worker usage is credited exactly once through `minions_read`, with
+`minions_close` flushing unread completion usage. Missed notifications are
+reconciled from the package's persistent lifecycle v3 artifact. `timeoutSeconds`
+maps to the package-owned persistent deadline.
 
 ### Low-budget stack
 
@@ -184,7 +196,8 @@ skills/
   pi-minions/              Pi entrypoint and RPC adapter
   pi-minions-lb/           Pi low-budget entrypoint and RPC adapter
 extensions/
-  pi-minions/              Shared provider-affine RPC worker runtime
+  pi-minions/              Provider-affine adapter over pi-subagents RPC v1
+    agents/                Managed Pi role agents and two-axis review leaf
 ```
 
 Installers create autosufficient skill directories by copying the core and selected
@@ -196,8 +209,10 @@ The frontier dispatches; discipline skills define how workers engineer:
 `grilling`, `implement`, `tdd`, `code-review`, `to-spec`, `to-tickets`,
 `codebase-design`, `domain-modeling`, and `diagnosing-bugs`.
 
-The platform-aware updater tracks `mattpocock/skills` for `implement`, `to-spec`, and
-`to-tickets`:
+The platform-aware updater installs all nine referenced disciplines from a pinned,
+reviewed `mattpocock/skills` revision: `grilling`, `implement`, `tdd`, `code-review`,
+`to-spec`, `to-tickets`, `codebase-design`, `domain-modeling`, and
+`diagnosing-bugs`:
 
 ```powershell
 scripts/update-disciplines.ps1 -Platform all
@@ -209,7 +224,9 @@ scripts/update-disciplines.sh --platform all
 
 Copilot registers cache directories with `copilot skill add`. Codex uses managed
 links under `~/.agents/skills`; Pi uses managed links under `~/.pi/agent/skills`.
-External discipline updates are non-fatal because
+The pinned revision is `2ab958093e83e0ec752e6c1c5932da465bf23e0c`; pass an
+explicit `REF`/`-Ref` to test an upgrade. Pi workers receive a detected discipline
+explicitly through `pi-subagents`; missing disciplines remain non-fatal because
 worker prompts include complete inline fallbacks.
 
 ## Tests
@@ -231,8 +248,9 @@ macOS.
 
 The dual-platform change lands as one backward-compatible PR. The first `v0.1.0`
 release is gated on a manual authenticated Codex run confirming the required model
-IDs and a real native-subagent orchestration cycle. Pi remains beta until real RPC
-orchestration runs pass with both `openai-codex` and `github-copilot`.
+IDs and a real native-subagent orchestration cycle. Pi remains beta until real
+`pi-subagents` orchestration and resume runs pass with both `openai-codex` and
+`github-copilot`.
 
 ## License
 

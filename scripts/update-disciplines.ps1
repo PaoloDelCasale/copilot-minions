@@ -3,12 +3,22 @@ param(
     [ValidateSet('copilot', 'codex', 'pi', 'all')]
     [string]$Platform = 'copilot',
     [string]$CacheDir,
-    [string]$Ref = 'main'
+    [string]$Ref = '2ab958093e83e0ec752e6c1c5932da465bf23e0c'
 )
 
 $ErrorActionPreference = 'Stop'
 $repoUrl = 'https://github.com/mattpocock/skills.git'
-$disciplines = @('implement', 'to-spec', 'to-tickets')
+$disciplines = @(
+    [pscustomobject]@{ Name = 'implement'; Path = 'engineering\implement' },
+    [pscustomobject]@{ Name = 'to-spec'; Path = 'engineering\to-spec' },
+    [pscustomobject]@{ Name = 'to-tickets'; Path = 'engineering\to-tickets' },
+    [pscustomobject]@{ Name = 'tdd'; Path = 'engineering\tdd' },
+    [pscustomobject]@{ Name = 'code-review'; Path = 'engineering\code-review' },
+    [pscustomobject]@{ Name = 'diagnosing-bugs'; Path = 'engineering\diagnosing-bugs' },
+    [pscustomobject]@{ Name = 'codebase-design'; Path = 'engineering\codebase-design' },
+    [pscustomobject]@{ Name = 'domain-modeling'; Path = 'engineering\domain-modeling' },
+    [pscustomobject]@{ Name = 'grilling'; Path = 'productivity\grilling' }
+)
 $installHome = if ($env:MINIONS_HOME) { $env:MINIONS_HOME } else { $HOME }
 
 if (-not $CacheDir) {
@@ -33,20 +43,28 @@ if (Test-Selected 'copilot') {
 
 if (Test-Path -LiteralPath (Join-Path $CacheDir '.git')) {
     Write-Host "Updating source: $CacheDir"
-    & git -C $CacheDir fetch --quiet origin
+    & git -C $CacheDir fetch --quiet --depth 1 origin $Ref
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to fetch the discipline source.'
     }
-    & git -C $CacheDir reset --hard --quiet "origin/$Ref"
+    & git -C $CacheDir reset --hard --quiet FETCH_HEAD
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to reset the discipline source.'
     }
 } else {
     Write-Host "Cloning source into: $CacheDir"
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CacheDir) | Out-Null
-    & git clone --quiet --depth 1 --branch $Ref $repoUrl $CacheDir
+    & git clone --quiet --filter=blob:none --no-checkout $repoUrl $CacheDir
     if ($LASTEXITCODE -ne 0) {
         throw 'Unable to clone the discipline source.'
+    }
+    & git -C $CacheDir fetch --quiet --depth 1 origin $Ref
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to fetch the pinned discipline source.'
+    }
+    & git -C $CacheDir checkout --quiet --detach FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Unable to check out the pinned discipline source.'
     }
 }
 
@@ -64,8 +82,9 @@ if (Test-Selected 'copilot') {
     }
 }
 
-foreach ($discipline in $disciplines) {
-    $source = Join-Path $CacheDir "skills\engineering\$discipline"
+foreach ($entry in $disciplines) {
+    $discipline = $entry.Name
+    $source = Join-Path $CacheDir "skills\$($entry.Path)"
     if (-not (Test-Path -LiteralPath $source -PathType Container)) {
         Write-Warning "Upstream no longer provides '$discipline'; skipping."
         continue

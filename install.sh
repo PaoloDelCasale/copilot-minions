@@ -29,6 +29,7 @@ INSTALL_HOME="${MINIONS_HOME:-$HOME}"
 CORE="${ROOT}/skills/core"
 LB_PROFILE="${ROOT}/skills/lb"
 MANAGED_MARKER="# managed-by: copilot-minions"
+PI_SUBAGENTS_PACKAGE="${PI_SUBAGENTS_PACKAGE:-npm:pi-subagents@0.37.2}"
 TRANSACTION_ID="$$.$RANDOM"
 STAGE_PATHS=()
 SKILL_STAGES=()
@@ -46,37 +47,17 @@ selected_platform() { [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]; }
 selected_variant() { [[ "${VARIANT}" == "$1" || "${VARIANT}" == "all" ]]; }
 require_directory() { [[ -d "$1" ]] || { echo "Source directory not found: $1" >&2; exit 1; }; }
 
-assert_pi_models() {
+assert_pi_available() {
   command -v pi >/dev/null 2>&1 || {
     echo "pi not found on PATH; Pi installation requires the Pi coding agent." >&2
     exit 1
   }
-  local catalog
-  if ! catalog="$(pi --list-models 2>&1)"; then
-    echo "Unable to read the Pi model catalog:" >&2
-    echo "${catalog}" >&2
-    exit 1
-  fi
-  local required=(
-    "openai-codex gpt-5.6-sol"
-    "openai-codex gpt-5.6-luna"
-    "github-copilot gpt-5.6-sol"
-    "github-copilot grok-4.5"
-  )
-  if selected_variant standard; then
-    required+=("openai-codex gpt-5.6-terra" "github-copilot gpt-5.6-terra")
-  fi
-  local missing=() route provider model
-  for route in "${required[@]}"; do
-    provider="${route%% *}"
-    model="${route#* }"
-    awk -v provider="${provider}" -v model="${model}" '
-      $1 == provider && $2 == model { found = 1 }
-      END { exit !found }
-    ' <<<"${catalog}" || missing+=("${provider}/${model}")
-  done
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    echo "Pi model catalog is incompatible with Pi Minions; missing required route(s): ${missing[*]}. Upgrade Pi to a catalog that exposes these exact models." >&2
+}
+
+install_pi_runtime() {
+  echo "Installing pinned Pi worker runtime: ${PI_SUBAGENTS_PACKAGE}"
+  if ! pi install "${PI_SUBAGENTS_PACKAGE}"; then
+    echo "Unable to install ${PI_SUBAGENTS_PACKAGE}; no Minions resources were committed." >&2
     exit 1
   fi
 }
@@ -153,6 +134,23 @@ new_pi_extension_stage() {
   parent="$(dirname "${destination}")"
   mkdir -p "${parent}"
   stage="${parent}/.pi-minions.stage.${TRANSACTION_ID}"
+  mkdir -p "${stage}"
+  cp -R "${source}/." "${stage}/"
+  STAGE_PATHS+=("${stage}")
+  SKILL_STAGES+=("${stage}")
+  SKILL_DESTS+=("${destination}")
+  SKILL_BACKUPS+=("")
+}
+
+new_pi_agents_stage() {
+  local source="${ROOT}/extensions/pi-minions/agents"
+  local destination="${INSTALL_HOME}/.pi/agent/agents/copilot-minions"
+  require_directory "${source}"
+  assert_managed_pi_directory "${destination}"
+  local parent stage
+  parent="$(dirname "${destination}")"
+  mkdir -p "${parent}"
+  stage="${parent}/.copilot-minions-agents.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
   cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
@@ -276,10 +274,14 @@ trap cleanup EXIT
 
 require_directory "${CORE}"
 selected_platform codex && assert_codex_models
-selected_platform pi && assert_pi_models
-selected_platform pi && new_pi_extension_stage
+selected_platform pi && assert_pi_available
+if selected_platform pi; then
+  new_pi_extension_stage
+  new_pi_agents_stage
+fi
 selected_variant standard && add_variant_stages standard
 selected_variant lb && add_variant_stages lb
+selected_platform pi && install_pi_runtime
 
 COMMIT_STARTED=1
 for i in "${!SKILL_DESTS[@]}"; do
@@ -337,6 +339,7 @@ fi
 echo "Installed platform: ${PLATFORM}; variant: ${VARIANT}"
 for destination in "${SKILL_DESTS[@]}"; do echo "  ${destination}"; done
 selected_platform codex && echo "  ${INSTALL_HOME}/.codex/agents (managed minions agents)"
+selected_platform pi && echo "  ${PI_SUBAGENTS_PACKAGE} (pinned Pi worker runtime)"
 echo
 
 UPDATER="${ROOT}/scripts/update-disciplines.sh"
