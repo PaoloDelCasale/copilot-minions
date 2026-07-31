@@ -1,6 +1,6 @@
 #Requires -Version 5.0
 param(
-    [ValidateSet('copilot', 'codex', 'pi', 'all')]
+    [ValidateSet('copilot', 'codex', 'pi', 'paseo', 'all')]
     [string]$Platform = 'copilot',
     [ValidateSet('standard', 'lb', 'all')]
     [string]$Variant = 'standard'
@@ -18,6 +18,11 @@ $piSubagentsPackage = if ($env:PI_SUBAGENTS_PACKAGE) {
 } else {
     'npm:pi-subagents@0.37.2'
 }
+$piMcpAdapterPackage = if ($env:PI_MCP_ADAPTER_PACKAGE) {
+    $env:PI_MCP_ADAPTER_PACKAGE
+} else {
+    'npm:pi-mcp-adapter@2.16.0'
+}
 $transactionId = [Guid]::NewGuid().ToString('N')
 $stagedSkills = @()
 $agentStages = @()
@@ -30,6 +35,10 @@ $transactionStarted = $false
 
 function Test-Platform([string]$name) {
     return $Platform -eq $name -or $Platform -eq 'all'
+}
+
+function Test-PiHost {
+    return (Test-Platform 'pi') -or (Test-Platform 'paseo')
 }
 
 function Test-Variant([string]$name) {
@@ -48,11 +57,11 @@ function Assert-PiAvailable {
     }
 }
 
-function Install-PiRuntime {
-    Write-Host "Installing pinned Pi worker runtime: $piSubagentsPackage"
-    & pi install $piSubagentsPackage
+function Install-PiPackage([string]$package) {
+    Write-Host "Installing pinned Pi runtime: $package"
+    & pi install $package
     if ($LASTEXITCODE -ne 0) {
-        throw "Unable to install $piSubagentsPackage; no Minions resources were committed."
+        throw "Unable to install $package; no Minions resources were committed."
     }
 }
 
@@ -235,7 +244,7 @@ function Add-VariantStages([string]$variantName) {
         New-AgentStage $name $overlay
         New-SkillStage $name $overlay $profile (Join-Path $installHome ".agents\skills\$name")
     }
-    if (Test-Platform 'pi') {
+    if (Test-PiHost) {
         $name = "pi-minions$suffix"
         $overlay = Join-Path $root "skills\$name"
         $destination = Join-Path $installHome ".pi\agent\skills\$name"
@@ -313,7 +322,7 @@ try {
     if (Test-Platform 'codex') {
         Assert-CodexModels
     }
-    if (Test-Platform 'pi') {
+    if (Test-PiHost) {
         Assert-PiAvailable
         New-PiExtensionStage
         New-PiAgentsStage
@@ -325,7 +334,10 @@ try {
         Add-VariantStages 'lb'
     }
     if (Test-Platform 'pi') {
-        Install-PiRuntime
+        Install-PiPackage $piSubagentsPackage
+    }
+    if (Test-Platform 'paseo') {
+        Install-PiPackage $piMcpAdapterPackage
     }
     Commit-Transaction
 } catch {
@@ -363,13 +375,17 @@ if (Test-Platform 'codex') {
 if (Test-Platform 'pi') {
     Write-Host "  $piSubagentsPackage (pinned Pi worker runtime)"
 }
+if (Test-Platform 'paseo') {
+    Write-Host "  $piMcpAdapterPackage (pinned Paseo MCP bridge)"
+}
 Write-Host ''
 
 $updater = Join-Path $root 'scripts\update-disciplines.ps1'
 if (Test-Path -LiteralPath $updater) {
     Write-Host 'Updating discipline skills...'
     try {
-        & $updater -Platform $Platform
+        $updaterPlatform = if ($Platform -eq 'paseo') { 'pi' } else { $Platform }
+        & $updater -Platform $updaterPlatform
     } catch {
         Write-Warning "Discipline update skipped: $($_.Exception.Message)"
     }

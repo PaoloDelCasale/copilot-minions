@@ -1,8 +1,9 @@
 ---
 name: pi-minions-lb
 description: >-
-  Low-budget orchestrator for Pi using persistent pi-subagents workers. Use in Pi when the
-  user says "orchestrate low budget", "minions lb", or "pi-minions-lb". Opt out
+  Low-budget orchestrator for Pi using persistent pi-subagents or native Paseo child
+  agents. Use in Pi when the user says "orchestrate low budget", "minions lb",
+  "pi-minions-lb", or "paseo-minions-lb". Opt out
   with "/direct", "skip minions", or "skip workers".
 ---
 

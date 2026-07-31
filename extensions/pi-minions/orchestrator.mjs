@@ -3,9 +3,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createPaseoRuntimeFromProcess } from "./paseo-runtime.mjs";
 
 const SUPPORTED_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
 const SUPPORTED_VARIANTS = new Set(["standard", "lb"]);
+const SUPPORTED_RUNTIMES = new Set(["pi-subagents", "paseo"]);
 const SUBAGENTS_RPC_VERSION = 1;
 const SUBAGENTS_RPC_REQUEST = "subagents:rpc:v1:request";
 const SUBAGENTS_RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:";
@@ -112,7 +114,7 @@ function truncateForContext(text, maxBytes = 50 * 1024) {
   if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
   let end = Math.min(text.length, maxBytes);
   while (Buffer.byteLength(text.slice(0, end), "utf8") > maxBytes) end--;
-  return `${text.slice(0, end)}\n\n[Output truncated for parent context; full output remains in pi-subagents artifacts.]`;
+  return `${text.slice(0, end)}\n\n[Output truncated for parent context; full output remains in the worker runtime.]`;
 }
 
 function combineUsage(...items) {
@@ -159,13 +161,14 @@ function usageFromCompletion(payload) {
   const tokens = payload?.totalTokens;
   const input = Number(tokens?.input ?? cost?.inputTokens) || 0;
   const output = Number(tokens?.output ?? cost?.outputTokens) || 0;
-  const totalTokens = Math.max(Number(tokens?.total) || 0, input + output);
+  const cacheRead = Number(tokens?.cacheRead) || 0;
+  const totalTokens = Math.max(Number(tokens?.total) || 0, input + output + cacheRead);
   const costUsd = Number(cost?.costUsd) || 0;
   if (totalTokens === 0 && costUsd === 0) return undefined;
   return {
     input,
     output,
-    cacheRead: 0,
+    cacheRead,
     cacheWrite: 0,
     totalTokens,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costUsd },
@@ -278,6 +281,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   const setRpcTimeout = dependencies.setRpcTimeout ?? setTimeout;
   const clearRpcTimeout = dependencies.clearRpcTimeout ?? clearTimeout;
   const rpcTimeoutMs = dependencies.rpcTimeoutMs ?? 10_000;
+  const paseoRuntime = dependencies.paseoRuntime === undefined
+    ? createPaseoRuntimeFromProcess(dependencies.paseoOptions)
+    : dependencies.paseoRuntime;
+  const paseoHosted = dependencies.paseoHosted
+    ?? Boolean((dependencies.paseoOptions?.env ?? process.env).PASEO_AGENT_ID?.trim());
   let run;
   let runtimeInfo;
   let changingModel = false;
@@ -288,6 +296,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       id: worker.id,
       subagentRunId: worker.subagentRunId,
+      runtimeAgentId: worker.runtimeAgentId,
       asyncDir: worker.asyncDir,
       role: worker.role,
       agent: worker.agent,
@@ -321,6 +330,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       runId: run.id,
       provider: run.provider,
       variant: run.variant,
+      runtime: run.runtime,
       lifecycle,
       originalModel: run.originalModel,
       originalThinking: run.originalThinking,
@@ -338,6 +348,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
     if (!latest || latest.lifecycle !== "active") return;
     if (!SUPPORTED_PROVIDERS.has(latest.provider) || !SUPPORTED_VARIANTS.has(latest.variant)) return;
+    if (latest.runtime !== undefined && !SUPPORTED_RUNTIMES.has(latest.runtime)) return;
     const workers = new Map();
     for (const snapshot of latest.workers ?? []) {
       if (!snapshot?.id || !snapshot?.subagentRunId || !ROLE_AGENTS[snapshot.role]) continue;
@@ -352,6 +363,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       id: latest.runId,
       provider: latest.provider,
       variant: latest.variant,
+      runtime: latest.runtime ?? "pi-subagents",
       originalModel: latest.originalModel,
       originalThinking: latest.originalThinking,
       nextWorkerNumber: latest.nextWorkerNumber ?? Math.max(0, ...[...workers.values()].map((worker) => worker.displayNumber ?? 0)) + 1,
@@ -368,7 +380,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     else pi.events?.off?.(event, handler);
   }
 
-  function rpcCall(method, params) {
+  function piSubagentsRpcCall(method, params) {
     if (!pi.events?.on || !pi.events?.emit) {
       return Promise.reject(new Error("Pi does not expose the event bus required by pi-subagents."));
     }
@@ -406,9 +418,28 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     });
   }
 
+  function runtimeKind() {
+    return run?.runtime ?? (paseoHosted || paseoRuntime ? "paseo" : "pi-subagents");
+  }
+
+  function runtimeCall(method, params) {
+    if (runtimeKind() === "paseo") {
+      if (!paseoRuntime) {
+        return Promise.reject(new Error("This orchestration uses Paseo, but its agent-scoped MCP runtime is unavailable. Install pi-mcp-adapter and reopen the Paseo agent."));
+      }
+      return paseoRuntime.call(method, params);
+    }
+    return piSubagentsRpcCall(method, params);
+  }
+
   async function ensureRuntime() {
     if (runtimeInfo) return runtimeInfo;
-    const info = await rpcCall("ping");
+    const info = await runtimeCall("ping");
+    if (runtimeKind() === "paseo") {
+      if (info?.runtime !== "paseo") throw new Error("Incompatible Paseo Minions runtime.");
+      runtimeInfo = info;
+      return info;
+    }
     const methods = new Set(info?.methods ?? []);
     const missing = REQUIRED_RPC_METHODS.filter((method) => !methods.has(method));
     if (info?.version !== SUBAGENTS_RPC_VERSION || missing.length > 0 || info?.capabilities?.asyncSpawn !== true) {
@@ -487,6 +518,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const worker = {
       id: idFactory(),
       subagentRunId: data.details.asyncId,
+      runtimeAgentId: data.details.runtimeAgentId,
       asyncDir: data.details.asyncDir,
       role: task.role,
       agent: route.agent,
@@ -528,6 +560,13 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   function findWorkerBySubagentRunId(subagentRunId) {
     if (!run || !subagentRunId) return undefined;
     return [...run.workers.values()].find((worker) => worker.subagentRunId === subagentRunId);
+  }
+
+  function runtimeTarget(worker) {
+    return {
+      id: worker.runtimeAgentId ?? worker.subagentRunId,
+      ...(run.runtime === "paseo" ? { runId: worker.subagentRunId } : {}),
+    };
   }
 
   function applyCompletion(worker, payload, ctx) {
@@ -579,10 +618,17 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
 
   async function refreshWorker(worker, ctx) {
     if (!activeStatus(worker.status)) return;
-    const data = await rpcCall("status", { id: worker.subagentRunId });
+    const data = await runtimeCall("status", {
+      ...runtimeTarget(worker),
+      requestedStop: worker.status === "stopping",
+    });
     const text = typeof data?.text === "string" ? data.text : "";
     const parsed = parseStatusText(text);
     worker.progress = text;
+    if (data?.details?.completion) {
+      applyCompletion(worker, data.details.completion, ctx);
+      return;
+    }
     if (["complete", "completed", "failed", "stopped", "paused"].includes(parsed.state)) {
       const lifecycle = readLifecycle(worker);
       const summary = lifecycle?.summary || parsed.output;
@@ -594,7 +640,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         ...(lifecycle?.error || parsed.error ? { error: lifecycle?.error ?? parsed.error } : {}),
       }, ctx);
       if (worker.status === "blocked" && !worker.error) {
-        worker.error = "pi-subagents reported a failed run.";
+        worker.error = `${run.runtime} reported a failed run.`;
       }
     }
   }
@@ -602,7 +648,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   pi.registerTool({
     name: "minions_start",
     label: "Start Minions",
-    description: "Start one provider-affine Pi orchestration run backed by pi-subagents.",
+    description: "Start one provider-affine Pi orchestration run on pi-subagents or Paseo's native agent runtime.",
     parameters: schemas.start ?? {},
     async execute(_id, params, _signal, _onUpdate, ctx) {
       lastContext = ctx;
@@ -626,6 +672,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const matrix = PROVIDER_MATRICES[provider][variant];
       const missing = matrix.requiredModels.filter((id) => !ctx.modelRegistry.find(provider, id));
       if (missing.length > 0) throw new Error(`Provider ${provider} is missing required model(s): ${missing.join(", ")}`);
+      const selectedRuntime = runtimeKind();
       await ensureRuntime();
 
       const frontier = ctx.modelRegistry.find(provider, "gpt-5.6-sol");
@@ -637,6 +684,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         id: idFactory(),
         provider,
         variant,
+        runtime: selectedRuntime,
         originalModel,
         originalThinking,
         workers: new Map(),
@@ -646,13 +694,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       };
       ctx.ui?.setStatus?.("pi-minions", `${provider} · ${variant}`);
       persistRun();
-      return textResult(`Started ${variant} orchestration with Provider Affinity ${provider} on pi-subagents RPC v1.`, {
+      const runtimeLabel = selectedRuntime === "paseo" ? "Paseo native agents" : "pi-subagents RPC v1";
+      return textResult(`Started ${variant} orchestration with Provider Affinity ${provider} on ${runtimeLabel}.`, {
         runId: run.id,
         provider,
         variant,
         frontier: "gpt-5.6-sol",
         thinking: "medium",
-        runtime: "pi-subagents",
+        runtime: selectedRuntime,
       });
     },
   });
@@ -675,7 +724,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         throw new Error(`Pi minions allows at most ${MAX_WORKER_LAUNCHES} worker launches per orchestration run.`);
       }
       const routes = tasks.map((task) => resolveWorkerRoute(task, ctx));
-      const settled = await Promise.allSettled(tasks.map((task, index) => rpcCall("spawn", spawnParams(task, routes[index]))));
+      const settled = await Promise.allSettled(tasks.map((task, index) => runtimeCall("spawn", spawnParams(task, routes[index]))));
       const launched = settled
         .map((result, index) => ({ result, index }))
         .filter(({ result }) => result.status === "fulfilled" && result.value?.details?.asyncId);
@@ -686,15 +735,15 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         for (const worker of workers) {
           if (activeStatus(worker.status)) {
             worker.status = "stopping";
-            worker.progress = "Stop requested; waiting for pi-subagents process-terminal confirmation.";
+            worker.progress = `Stop requested; waiting for ${run.runtime} terminal confirmation.`;
           }
         }
         persistRun();
-        await Promise.allSettled(workers.map((worker) => rpcCall("stop", { id: worker.subagentRunId })));
+        await Promise.allSettled(workers.map((worker) => runtimeCall("stop", runtimeTarget(worker))));
         persistRun();
         const reason = failure.status === "rejected"
           ? failure.reason
-          : new Error("pi-subagents spawn reply did not include an async run id.");
+          : new Error(`${run.runtime} spawn reply did not include a worker run id.`);
         throw reason;
       }
 
@@ -702,7 +751,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       run.launchCount += workers.length;
       persistRun();
       return textResult(
-        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}. End this turn now; do not poll. pi-subagents will notify this session on completion.`,
+        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}. End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
         { workers: workers.map(workerSnapshot) },
       );
     },
@@ -711,7 +760,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   pi.registerTool({
     name: "minions_read",
     label: "Read Minions",
-    description: "Read status and final output from managed pi-subagents workers.",
+    description: "Read status and final output from managed Minions workers.",
     parameters: schemas.read ?? {},
     async execute(_id, params, _signal, _onUpdate, ctx) {
       lastContext = ctx;
@@ -760,7 +809,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   pi.registerTool({
     name: "minions_steer",
     label: "Steer Minion",
-    description: "Send acknowledged guidance to a live pi-subagents worker.",
+    description: "Send acknowledged guidance to a live managed worker.",
     parameters: schemas.steer ?? {},
     async execute(_id, params, _signal, _onUpdate, ctx) {
       lastContext = ctx;
@@ -769,7 +818,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (!worker) throw new Error(`Unknown worker: ${params.workerId}`);
       if (worker.status !== "in-flight") throw new Error(`Worker ${params.workerId} is not in flight.`);
       await ensureRuntime();
-      const data = await rpcCall("steer", { id: worker.subagentRunId, message: params.message });
+      const data = await runtimeCall("steer", { ...runtimeTarget(worker), message: params.message });
       return textResult(data?.text || `Steering acknowledged for worker ${worker.id}.`, {
         workerId: worker.id,
         subagentRunId: worker.subagentRunId,
@@ -797,10 +846,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         throw new Error(`Pi minions reached its ${MAX_WORKER_LAUNCHES}-launch worker budget.`);
       }
       await ensureRuntime();
-      const data = await rpcCall("resume", { id: worker.subagentRunId, message: params.message });
+      const data = await runtimeCall("resume", { ...runtimeTarget(worker), message: params.message });
       const resumedId = data?.details?.asyncId;
-      if (!resumedId) throw new Error("pi-subagents resume reply did not include an async run id.");
+      if (!resumedId) throw new Error(`${run.runtime} resume reply did not include a worker run id.`);
       worker.subagentRunId = resumedId;
+      worker.runtimeAgentId = data.details.runtimeAgentId ?? worker.runtimeAgentId;
       worker.asyncDir = data.details.asyncDir;
       worker.status = "in-flight";
       worker.startedAt = now();
@@ -815,7 +865,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         applyCompletion(worker, early, ctx);
       }
       persistRun();
-      return textResult(`Resumed worker ${worker.id} as pi-subagents run ${resumedId}. End this turn and wait for its completion notification.`, {
+      return textResult(`Resumed worker ${worker.id} as ${run.runtime} run ${resumedId}. End this turn and wait for its completion notification.`, {
         worker: workerSnapshot(worker),
       });
     },
@@ -840,13 +890,13 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const active = selected.filter((worker) => activeStatus(worker.status));
       if (active.length > 0) {
         await ensureRuntime();
-        const settled = await Promise.allSettled(active.map((worker) => rpcCall("stop", { id: worker.subagentRunId })));
+        const settled = await Promise.allSettled(active.map((worker) => runtimeCall("stop", runtimeTarget(worker))));
         const failed = settled.find((result) => result.status === "rejected");
         if (failed) throw failed.reason;
         for (const worker of active) {
           if (activeStatus(worker.status)) {
             worker.status = "stopping";
-            worker.progress = "Stop requested; waiting for pi-subagents process-terminal confirmation.";
+            worker.progress = `Stop requested; waiting for ${run.runtime} terminal confirmation.`;
           }
         }
         persistRun();
@@ -889,7 +939,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       persistRun("closed");
       run = undefined;
       ctx.ui?.setStatus?.("pi-minions", undefined);
-      const result = textResult(`Closed orchestration ${closing.id} and restored the original model. pi-subagents artifacts and resumable sessions remain available.`, {
+      const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${closing.runtime === "paseo" ? "Paseo agents" : "pi-subagents artifacts and resumable sessions"} remain available.`, {
         runId: closing.id,
       });
       if (pendingUsage) result.usage = pendingUsage;
@@ -899,6 +949,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
 
   pi.on("input", (event) => {
     if (event.source === "extension") return { action: "continue" };
+    if (event.text.startsWith("/skill:paseo-minions-lb")) {
+      return { action: "transform", text: event.text.replace("/skill:paseo-minions-lb", "/skill:pi-minions-lb") };
+    }
+    if (event.text.startsWith("/skill:paseo-minions")) {
+      return { action: "transform", text: event.text.replace("/skill:paseo-minions", "/skill:pi-minions") };
+    }
     if (event.text.startsWith("/skill:codex-minions-lb")) {
       return { action: "transform", text: event.text.replace("/skill:codex-minions-lb", "/skill:pi-minions-lb") };
     }
@@ -913,7 +969,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       systemPrompt: `${event.systemPrompt}
 
-Pi harness routing: use pi-minions or pi-minions-lb for top-level orchestration. The minions tools delegate to the installed pi-subagents runtime; never call the generic subagent tool directly for top-level dispatch because minions owns provider affinity, role routing, budgets, and board identity. You may use subagent_supervisor only to answer a managed worker request. After minions_spawn or minions_resume, end the turn immediately. A pi-subagents background completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
+Pi harness routing: use pi-minions or pi-minions-lb for top-level orchestration. Minions owns provider affinity, role routing, budgets, and board identity. In Paseo agent sessions it delegates to Paseo-managed child agents; otherwise it delegates to pi-subagents. Never call the generic subagent tool directly or use MCP create_agent for top-level dispatch; do not bypass Minions. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
     };
   });
 

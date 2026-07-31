@@ -16,12 +16,12 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 [--platform copilot|codex|pi|all] [--variant standard|lb|all]" >&2
+      echo "Usage: $0 [--platform copilot|codex|pi|paseo|all] [--variant standard|lb|all]" >&2
       exit 2
       ;;
   esac
 done
-case "${PLATFORM}" in copilot|codex|pi|all) ;; *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;; esac
+case "${PLATFORM}" in copilot|codex|pi|paseo|all) ;; *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;; esac
 case "${VARIANT}" in standard|lb|all) ;; *) echo "Unknown variant: ${VARIANT}" >&2; exit 2 ;; esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +30,7 @@ CORE="${ROOT}/skills/core"
 LB_PROFILE="${ROOT}/skills/lb"
 MANAGED_MARKER="# managed-by: copilot-minions"
 PI_SUBAGENTS_PACKAGE="${PI_SUBAGENTS_PACKAGE:-npm:pi-subagents@0.37.2}"
+PI_MCP_ADAPTER_PACKAGE="${PI_MCP_ADAPTER_PACKAGE:-npm:pi-mcp-adapter@2.16.0}"
 TRANSACTION_ID="$$.$RANDOM"
 STAGE_PATHS=()
 SKILL_STAGES=()
@@ -44,6 +45,7 @@ OBSOLETE_AGENT_TARGETS=()
 COMMIT_STARTED=0
 
 selected_platform() { [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]; }
+selected_pi_host() { selected_platform pi || selected_platform paseo; }
 selected_variant() { [[ "${VARIANT}" == "$1" || "${VARIANT}" == "all" ]]; }
 require_directory() { [[ -d "$1" ]] || { echo "Source directory not found: $1" >&2; exit 1; }; }
 
@@ -54,10 +56,11 @@ assert_pi_available() {
   }
 }
 
-install_pi_runtime() {
-  echo "Installing pinned Pi worker runtime: ${PI_SUBAGENTS_PACKAGE}"
-  if ! pi install "${PI_SUBAGENTS_PACKAGE}"; then
-    echo "Unable to install ${PI_SUBAGENTS_PACKAGE}; no Minions resources were committed." >&2
+install_pi_package() {
+  local package="$1"
+  echo "Installing pinned Pi runtime: ${package}"
+  if ! pi install "${package}"; then
+    echo "Unable to install ${package}; no Minions resources were committed." >&2
     exit 1
   fi
 }
@@ -218,7 +221,7 @@ add_variant_stages() {
     new_agent_stage "${name}" "${overlay}"
     new_skill_stage "${name}" "${overlay}" "${profile}" "${INSTALL_HOME}/.agents/skills/${name}"
   fi
-  if selected_platform pi; then
+  if selected_pi_host; then
     name="pi-minions${suffix}"
     overlay="${ROOT}/skills/${name}"
     destination="${INSTALL_HOME}/.pi/agent/skills/${name}"
@@ -274,14 +277,15 @@ trap cleanup EXIT
 
 require_directory "${CORE}"
 selected_platform codex && assert_codex_models
-selected_platform pi && assert_pi_available
-if selected_platform pi; then
+selected_pi_host && assert_pi_available
+if selected_pi_host; then
   new_pi_extension_stage
   new_pi_agents_stage
 fi
 selected_variant standard && add_variant_stages standard
 selected_variant lb && add_variant_stages lb
-selected_platform pi && install_pi_runtime
+selected_platform pi && install_pi_package "${PI_SUBAGENTS_PACKAGE}"
+selected_platform paseo && install_pi_package "${PI_MCP_ADAPTER_PACKAGE}"
 
 COMMIT_STARTED=1
 for i in "${!SKILL_DESTS[@]}"; do
@@ -340,12 +344,15 @@ echo "Installed platform: ${PLATFORM}; variant: ${VARIANT}"
 for destination in "${SKILL_DESTS[@]}"; do echo "  ${destination}"; done
 selected_platform codex && echo "  ${INSTALL_HOME}/.codex/agents (managed minions agents)"
 selected_platform pi && echo "  ${PI_SUBAGENTS_PACKAGE} (pinned Pi worker runtime)"
+selected_platform paseo && echo "  ${PI_MCP_ADAPTER_PACKAGE} (pinned Paseo MCP bridge)"
 echo
 
 UPDATER="${ROOT}/scripts/update-disciplines.sh"
 if [[ -f "${UPDATER}" ]]; then
   echo "Updating discipline skills..."
-  bash "${UPDATER}" --platform "${PLATFORM}" || echo "Discipline update skipped." >&2
+  updater_platform="${PLATFORM}"
+  [[ "${updater_platform}" == "paseo" ]] && updater_platform="pi"
+  bash "${UPDATER}" --platform "${updater_platform}" || echo "Discipline update skipped." >&2
   echo
 fi
 

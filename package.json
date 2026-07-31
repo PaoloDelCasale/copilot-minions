@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:pi": "node --experimental-strip-types --test ./tests/pi-extension.test.mjs"
+    "test:pi": "node --experimental-strip-types --test ./tests/pi-extension.test.mjs ./tests/paseo-runtime.test.mjs"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.83.0",

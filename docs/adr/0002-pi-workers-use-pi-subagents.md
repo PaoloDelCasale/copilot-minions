@@ -3,7 +3,8 @@
 ## Status
 
 Accepted on the experimental `agent/use-pi-subagents-runtime` branch. This
-supersedes ADR 0001 for Pi.
+supersedes ADR 0001 for ordinary Pi sessions. Paseo-hosted Pi is complemented by
+[ADR 0003](0003-paseo-hosted-pi-uses-native-agents.md).
 
 ## Context
 
