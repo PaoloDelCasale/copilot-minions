@@ -412,9 +412,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     if (
       info?.capabilities?.nonRecoveringSteer !== true
       || info?.capabilities?.processTerminalProof?.version !== 1
-      || info?.capabilities?.processTerminalProof?.lifecycleArtifactVersion !== 1
+      || info?.capabilities?.processTerminalProof?.lifecycleArtifactVersion !== 3
     ) {
-      throw new Error("Incompatible pi-subagents runtime: Minions requires non-recovering steering and lifecycle artifact v1.");
+      throw new Error("Incompatible pi-subagents runtime: Minions requires non-recovering steering and lifecycle artifact v3.");
     }
     if (info?.events?.asyncComplete !== SUBAGENTS_ASYNC_COMPLETE) {
       throw new Error("Incompatible pi-subagents completion event contract.");
@@ -470,6 +470,38 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         notifyChannels: ["event"],
       },
     };
+  }
+
+  function registerSpawnedWorker(data, task, route, ctx) {
+    const worker = {
+      id: idFactory(),
+      subagentRunId: data.details.asyncId,
+      asyncDir: data.details.asyncDir,
+      role: task.role,
+      agent: route.agent,
+      task: task.task,
+      cwd: route.cwd,
+      provider: run.provider,
+      model: route.modelId,
+      thinking: route.thinking,
+      routeOverride: task.routeOverride,
+      displayNumber: run.nextWorkerNumber++,
+      status: "in-flight",
+      startedAt: now(),
+      timeoutSeconds: task.timeoutSeconds,
+      output: "",
+      observedRunIds: new Set(),
+      triagedRunIds: new Set(),
+      discipline: route.discipline,
+      disciplineLoaded: route.disciplineLoaded,
+    };
+    run.workers.set(worker.id, worker);
+    const early = earlyCompletions.get(worker.subagentRunId);
+    if (early) {
+      earlyCompletions.delete(worker.subagentRunId);
+      applyCompletion(worker, early, ctx);
+    }
+    return worker;
   }
 
   function findWorkerBySubagentRunId(subagentRunId) {
@@ -625,55 +657,29 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       }
       const routes = tasks.map((task) => resolveWorkerRoute(task, ctx));
       const settled = await Promise.allSettled(tasks.map((task, index) => rpcCall("spawn", spawnParams(task, routes[index]))));
-      const successfulRuns = settled
-        .filter((result) => result.status === "fulfilled")
-        .map((result) => result.value?.details?.asyncId)
-        .filter(Boolean);
+      const launched = settled
+        .map((result, index) => ({ result, index }))
+        .filter(({ result }) => result.status === "fulfilled" && result.value?.details?.asyncId);
       const failure = settled.find((result) => result.status === "rejected" || !result.value?.details?.asyncId);
       if (failure) {
-        run.launchCount += successfulRuns.length;
+        const workers = launched.map(({ result, index }) => registerSpawnedWorker(result.value, tasks[index], routes[index], ctx));
+        run.launchCount += workers.length;
+        for (const worker of workers) {
+          if (activeStatus(worker.status)) {
+            worker.status = "stopping";
+            worker.progress = "Stop requested; waiting for pi-subagents process-terminal confirmation.";
+          }
+        }
         persistRun();
-        await Promise.allSettled(successfulRuns.map((id) => rpcCall("stop", { id })));
+        await Promise.allSettled(workers.map((worker) => rpcCall("stop", { id: worker.subagentRunId })));
+        persistRun();
         const reason = failure.status === "rejected"
           ? failure.reason
           : new Error("pi-subagents spawn reply did not include an async run id.");
         throw reason;
       }
 
-      const workers = settled.map((result, index) => {
-        const data = result.value;
-        const route = routes[index];
-        const task = tasks[index];
-        const worker = {
-          id: idFactory(),
-          subagentRunId: data.details.asyncId,
-          asyncDir: data.details.asyncDir,
-          role: task.role,
-          agent: route.agent,
-          task: task.task,
-          cwd: route.cwd,
-          provider: run.provider,
-          model: route.modelId,
-          thinking: route.thinking,
-          routeOverride: task.routeOverride,
-          displayNumber: run.nextWorkerNumber++,
-          status: "in-flight",
-          startedAt: now(),
-          timeoutSeconds: task.timeoutSeconds,
-          output: "",
-          observedRunIds: new Set(),
-          triagedRunIds: new Set(),
-          discipline: route.discipline,
-          disciplineLoaded: route.disciplineLoaded,
-        };
-        run.workers.set(worker.id, worker);
-        const early = earlyCompletions.get(worker.subagentRunId);
-        if (early) {
-          earlyCompletions.delete(worker.subagentRunId);
-          applyCompletion(worker, early, ctx);
-        }
-        return worker;
-      });
+      const workers = launched.map(({ result, index }) => registerSpawnedWorker(result.value, tasks[index], routes[index], ctx));
       run.launchCount += workers.length;
       persistRun();
       return textResult(
@@ -764,6 +770,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (!worker) throw new Error(`Unknown worker: ${params.workerId}`);
       if (activeStatus(worker.status) || worker.status === "stopped") {
         throw new Error(`Worker ${params.workerId} cannot be resumed from status ${worker.status}.`);
+      }
+      const inFlight = [...run.workers.values()].filter((candidate) => activeStatus(candidate.status)).length;
+      if (inFlight >= MAX_IN_FLIGHT) throw new Error(`Pi minions allows at most ${MAX_IN_FLIGHT} in-flight workers.`);
+      if (run.triagedCount >= MAX_TRIAGED_RESULTS) {
+        throw new Error(`Pi minions reached its ${MAX_TRIAGED_RESULTS}-result triage budget; close and start a new orchestration run.`);
       }
       if (run.launchCount >= MAX_WORKER_LAUNCHES) {
         throw new Error(`Pi minions reached its ${MAX_WORKER_LAUNCHES}-launch worker budget.`);

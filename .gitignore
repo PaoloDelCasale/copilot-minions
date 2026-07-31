@@ -1,4 +1,5 @@
 .worktrees/
+.pi-subagents/
 .DS_Store
 *.log
 node_modules/

@@ -72,12 +72,12 @@ Destinations:
 
 Codex installation requires `codex` on `PATH` and runs `codex debug models` before
 writing files. It requires Sol and Luna, plus Terra for the standard variant. Pi
-installation requires `pi` on `PATH`; it installs the pinned
-`npm:pi-subagents@0.37.2` package and validates the provider-specific model catalog.
-Set `PI_SUBAGENTS_PACKAGE` only when deliberately testing another compatible
-package version. Runtime model availability is checked again at orchestration start
-because it depends on the active authenticated provider. `all` preflights and stages
-every platform before replacing any Minions installation.
+installation requires `pi` on `PATH` and installs the pinned
+`npm:pi-subagents@0.37.2` package without requiring model availability. Set
+`PI_SUBAGENTS_PACKAGE` only when deliberately testing another compatible package
+version. Pi validates the active provider's exact model routes when an orchestration
+run starts. `all` preflights and stages every platform before replacing any Minions
+installation.
 
 The six Codex and seven Pi agent files are namespaced and carry managed markers. Pi
 skills and the shared extension are managed as well. The installer updates only
@@ -131,10 +131,11 @@ Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
 `<provider>/gpt-5.6-sol:medium`; workers use that provider's matrix while every model
 is qualified with the same provider. Required-model preflight and route lookup are
-provider-specific. The installers and runtime require exact catalog IDs—including
-`github-copilot/grok-4.5`—and direct users to upgrade Pi when a route is missing;
-there is no cross-provider or availability fallback. Closing the run restores the
-parent's original model and thinking level.
+provider-specific. At orchestration start, the runtime requires exact catalog
+IDs—including `github-copilot/grok-4.5`—and directs users to upgrade Pi when a route
+is missing; there is no cross-provider or availability fallback. Installation does
+not require those models to be available. Closing the run restores the parent's
+original model and thinking level.
 
 Workers use namespaced `pi-subagents` agents and explicit provider-qualified model
 routes. `pi-subagents` owns process lifecycle, FleetView, artifacts, session recovery,
@@ -149,7 +150,7 @@ after eight triaged results per run. Implementer and architect launches require 
 explicit linked Git worktree; the runtime rejects a primary checkout before
 spawning. Worker usage is credited exactly once through `minions_read`, with
 `minions_close` flushing unread completion usage. Missed notifications are
-reconciled from the package's persistent lifecycle v1 artifact. `timeoutSeconds`
+reconciled from the package's persistent lifecycle v3 artifact. `timeoutSeconds`
 maps to the package-owned persistent deadline.
 
 ### Low-budget stack

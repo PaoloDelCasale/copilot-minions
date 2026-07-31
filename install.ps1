@@ -42,31 +42,9 @@ function Assert-Directory([string]$path) {
     }
 }
 
-function Assert-PiModels {
+function Assert-PiAvailable {
     if (-not (Get-Command pi -ErrorAction SilentlyContinue)) {
         throw 'pi not found on PATH; Pi installation requires the Pi coding agent.'
-    }
-    $catalog = (& pi --list-models 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to read the Pi model catalog:`n$catalog"
-    }
-    $required = @(
-        @('openai-codex', 'gpt-5.6-sol'),
-        @('openai-codex', 'gpt-5.6-luna'),
-        @('github-copilot', 'gpt-5.6-sol'),
-        @('github-copilot', 'grok-4.5')
-    )
-    if (Test-Variant 'standard') {
-        $required += ,@('openai-codex', 'gpt-5.6-terra')
-        $required += ,@('github-copilot', 'gpt-5.6-terra')
-    }
-    $missing = @($required | Where-Object {
-        $provider = [regex]::Escape($_[0])
-        $model = [regex]::Escape($_[1])
-        $catalog -notmatch "(?m)^\s*$provider\s+$model(?:\s|$)"
-    } | ForEach-Object { "$($_[0])/$($_[1])" })
-    if ($missing.Count -gt 0) {
-        throw "Pi model catalog is incompatible with Pi Minions; missing required route(s): $($missing -join ', '). Upgrade Pi to a catalog that exposes these exact models."
     }
 }
 
@@ -336,7 +314,7 @@ try {
         Assert-CodexModels
     }
     if (Test-Platform 'pi') {
-        Assert-PiModels
+        Assert-PiAvailable
         New-PiExtensionStage
         New-PiAgentsStage
     }

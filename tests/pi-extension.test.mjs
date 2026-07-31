@@ -73,7 +73,7 @@ class FakeSubagentsRuntime {
           nonRecoveringSteer: true,
           stop: true,
           resume: true,
-          processTerminalProof: { version: 1, lifecycleArtifactVersion: 1 },
+          processTerminalProof: { version: 1, lifecycleArtifactVersion: 3 },
         },
         events: { asyncComplete: ASYNC_COMPLETE },
       };
@@ -324,7 +324,7 @@ test("start rejects an incompatible pi-subagents runtime without changing model"
         methods: ["ping", "status", "spawn", "steer", "interrupt", "stop", "resume"],
         capabilities: {
           asyncSpawn: true,
-          processTerminalProof: { version: 1, lifecycleArtifactVersion: 1 },
+          processTerminalProof: { version: 1, lifecycleArtifactVersion: 3 },
         },
         events: { asyncComplete: ASYNC_COMPLETE },
       },
@@ -341,6 +341,13 @@ test("Provider Affinity rejects unsupported providers and missing exact routes",
   const missing = createHarness({ missingModels: ["gpt-5.6-luna"] });
   await assert.rejects(start(missing), /missing required model.*gpt-5\.6-luna/);
   assert.equal(missing.runtime.byMethod("ping").length, 0);
+
+  const missingCopilot = createHarness({
+    provider: "github-copilot",
+    missingModels: ["grok-4.5"],
+  });
+  await assert.rejects(start(missingCopilot), /missing required model.*grok-4\.5/);
+  assert.equal(missingCopilot.runtime.byMethod("ping").length, 0);
 });
 
 test("spawn delegates to the namespaced agent with qualified model, timeout, and explicit discipline", async () => {
@@ -416,15 +423,34 @@ test("spawn preflights the entire batch before starting any child", async () => 
   assert.equal(harness.runtime.byMethod("spawn").length, 0);
 });
 
-test("a partially failed RPC batch stops every child that was already launched", async () => {
-  const harness = createHarness({ runtimeOptions: { failSpawnAt: 1 } });
+test("a partially failed RPC batch retains every launched child through terminal usage", async () => {
+  const harness = createHarness({ runtimeOptions: { failSpawnAt: 2 } });
   await start(harness);
   await assert.rejects(spawn(harness, [
     { role: "explorer", task: "Explore A" },
     { role: "reviewer", task: "Review B" },
+    { role: "planner", task: "Plan C" },
   ]), /Injected spawn failure/);
-  assert.equal(harness.runtime.byMethod("spawn").length, 2);
-  assert.deepEqual(harness.runtime.byMethod("stop").map((call) => call.params.id), ["sub-run-1"]);
+
+  assert.equal(harness.runtime.byMethod("spawn").length, 3);
+  assert.deepEqual(harness.runtime.byMethod("stop").map((call) => call.params.id), ["sub-run-1", "sub-run-2"]);
+  const stopping = await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  assert.deepEqual(stopping.details.workers.map((worker) => worker.status), ["stopping", "stopping"]);
+  await assert.rejects(execute(harness.tools.get("minions_close"), {}, harness.ctx), /2 live worker/);
+
+  const usage = {
+    totalTokens: { input: 10, output: 2, total: 12 },
+    totalCost: { inputTokens: 10, outputTokens: 2, costUsd: 0.03 },
+  };
+  harness.runtime.complete("sub-run-1", { state: "stopped", success: false, summary: "Stopped A", ...usage });
+  harness.runtime.complete("sub-run-2", { state: "stopped", success: false, summary: "Stopped B", ...usage });
+  const terminal = await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  assert.deepEqual(terminal.details.workers.map((worker) => worker.status), ["stopped", "stopped"]);
+  assert.equal(terminal.usage.totalTokens, 24);
+  assert.equal(terminal.usage.cost.total, 0.06);
+  const repeated = await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  assert.equal(repeated.usage, undefined);
+  await execute(harness.tools.get("minions_close"), {}, harness.ctx);
 });
 
 test("provider and low-budget matrices are preserved through per-run model overrides", async () => {
@@ -460,21 +486,29 @@ test("named escalation routes retain their exact model and effort", async () => 
 test("the wrapper enforces six concurrent workers and the eight-result triage handoff", async () => {
   const harness = createHarness();
   await start(harness);
+  const paused = await spawn(harness, [{ role: "reviewer", task: "Pause me" }]);
+  const pausedWorker = paused.details.workers[0];
+  harness.runtime.complete(pausedWorker.subagentRunId, { success: false, state: "paused", summary: "Need another pass" });
   const six = Array.from({ length: 6 }, (_, index) => ({ role: "explorer", task: `Explore ${index}` }));
-  const first = await spawn(harness, six);
-  await assert.rejects(spawn(harness, [{ role: "reviewer", task: "Seventh live" }]), /at most 6 in-flight/);
+  const live = await spawn(harness, six);
+  await assert.rejects(execute(harness.tools.get("minions_resume"), {
+    workerId: pausedWorker.id,
+    message: "Resume despite full live capacity",
+  }, harness.ctx), /at most 6 in-flight/);
+  assert.equal(harness.runtime.byMethod("resume").length, 0);
 
-  for (const worker of first.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
+  for (const worker of live.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
+  const eighth = await spawn(harness, [{ role: "planner", task: "Eighth result" }]);
+  harness.runtime.complete(eighth.details.workers[0].subagentRunId, { summary: "done" });
   await execute(harness.tools.get("minions_read"), {}, harness.ctx);
-  const second = await spawn(harness, [
-    { role: "explorer", task: "Seven" },
-    { role: "reviewer", task: "Eight" },
-  ]);
-  for (const worker of second.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
-  await execute(harness.tools.get("minions_read"), {
-    workerIds: second.details.workers.map((worker) => worker.id),
-  }, harness.ctx);
-  await assert.rejects(spawn(harness, [{ role: "planner", task: "Nine" }]), /8-result triage budget/);
+  await assert.rejects(execute(harness.tools.get("minions_resume"), {
+    workerId: pausedWorker.id,
+    message: "Resume after triage handoff",
+  }, harness.ctx), /8-result triage budget/);
+  assert.equal(harness.runtime.byMethod("resume").length, 0);
+  const spawnCalls = harness.runtime.byMethod("spawn").length;
+  await assert.rejects(spawn(harness, [{ role: "planner", task: "Ninth result" }]), /8-result triage budget/);
+  assert.equal(harness.runtime.byMethod("spawn").length, spawnCalls);
 });
 
 test("the wrapper enforces the twelve-launch worker budget even when results are unread", async () => {
@@ -488,6 +522,28 @@ test("the wrapper enforces the twelve-launch worker budget even when results are
     for (const worker of result.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
   }
   await assert.rejects(spawn(harness, [{ role: "planner", task: "Thirteenth" }]), /at most 12 worker launches/);
+});
+
+test("partial successes consume their launch budget before the stop lifecycle completes", async () => {
+  const harness = createHarness({ runtimeOptions: { failSpawnAt: 11 } });
+  await start(harness);
+  for (const size of [6, 4]) {
+    const batch = await spawn(harness, Array.from({ length: size }, (_, index) => ({
+      role: "explorer",
+      task: `Completed task ${size}-${index}`,
+    })));
+    for (const worker of batch.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
+  }
+
+  await assert.rejects(spawn(harness, [
+    { role: "explorer", task: "Partial A" },
+    { role: "reviewer", task: "Partial B" },
+  ]), /Injected spawn failure/);
+  await assert.rejects(spawn(harness, [
+    { role: "planner", task: "Would exceed A" },
+    { role: "planner", task: "Would exceed B" },
+  ]), /at most 12 worker launches/);
+  assert.equal(harness.runtime.byMethod("spawn").length, 12);
 });
 
 test("completion output, tokens, and cost are credited exactly once", async () => {

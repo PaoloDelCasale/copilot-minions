@@ -223,22 +223,9 @@ exit /b 0
     $piCatalogSentinel = Join-Path $piExtension 'catalog-sentinel'
     Set-Content -LiteralPath $piCatalogSentinel -Value 'keep'
     $env:MINIONS_TEST_PI_MODELS = 'missing-grok'
-    $failed = $false
-    try {
-        & (Join-Path $root 'install.ps1') -Platform pi | Out-Null
-    } catch {
-        $failed = $true
-    }
-    Assert-True $failed 'Incompatible Pi catalog fails installation'
-    Assert-True (Test-Path $piCatalogSentinel) 'Failed Pi preflight leaves the installed extension untouched'
-    $env:MINIONS_TEST_PI_MODELS = 'near-grok'
-    $failed = $false
-    try {
-        & (Join-Path $root 'install.ps1') -Platform pi | Out-Null
-    } catch {
-        $failed = $true
-    }
-    Assert-True $failed 'Near-match Pi model IDs are rejected'
+    & (Join-Path $root 'install.ps1') -Platform pi | Out-Null
+    Assert-True (-not (Test-Path $piCatalogSentinel)) 'Incomplete Pi catalog does not block installation'
+    Assert-True (Test-Path (Join-Path $piSkill 'SKILL.md')) 'Pi skill is installed with an incomplete model catalog'
     Remove-Item Env:MINIONS_TEST_PI_MODELS
 
     Set-Content -LiteralPath (Join-Path $copilotSkill 'sentinel.txt') -Value 'keep'

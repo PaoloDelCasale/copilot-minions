@@ -166,16 +166,9 @@ unset MINIONS_TEST_FAIL_MOVE_TARGET MINIONS_TEST_FAIL_MOVE_STATE
 
 touch "${PI_EXTENSION}/catalog-sentinel"
 export MINIONS_TEST_PI_MODELS=missing-grok
-if bash "${ROOT}/install.sh" --platform pi >/dev/null 2>&1; then
-  echo 'Expected incompatible Pi catalog preflight to fail.' >&2
-  exit 1
-fi
-[[ -f "${PI_EXTENSION}/catalog-sentinel" ]]
-export MINIONS_TEST_PI_MODELS=near-grok
-if bash "${ROOT}/install.sh" --platform pi >/dev/null 2>&1; then
-  echo 'Expected near-match Pi model IDs to fail.' >&2
-  exit 1
-fi
+bash "${ROOT}/install.sh" --platform pi >/dev/null
+[[ ! -e "${PI_EXTENSION}/catalog-sentinel" ]]
+[[ -f "${PI_SKILL}/SKILL.md" ]]
 unset MINIONS_TEST_PI_MODELS
 
 touch "${COPILOT_SKILL}/sentinel"
