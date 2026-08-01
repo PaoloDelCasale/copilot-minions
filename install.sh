@@ -3,6 +3,12 @@ set -Eeuo pipefail
 
 PLATFORM="copilot"
 VARIANT="standard"
+SCOPE="global"
+TARGET_DIR=""
+INVOCATION_CWD="$(pwd -P)"
+usage() {
+  echo "Usage: $0 [--platform copilot|codex|pi|paseo|all] [--variant standard|lb|all] [--scope global|project] [--target-dir DIR]" >&2
+}
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --platform)
@@ -15,17 +21,48 @@ while [[ $# -gt 0 ]]; do
       VARIANT="$2"
       shift 2
       ;;
+    --scope)
+      [[ $# -ge 2 ]] || { echo "Missing --scope value." >&2; exit 2; }
+      SCOPE="$2"
+      shift 2
+      ;;
+    --target-dir)
+      [[ $# -ge 2 ]] || { echo "Missing --target-dir value." >&2; exit 2; }
+      TARGET_DIR="$2"
+      shift 2
+      ;;
     *)
-      echo "Usage: $0 [--platform copilot|codex|pi|paseo|all] [--variant standard|lb|all]" >&2
+      usage
       exit 2
       ;;
   esac
 done
 case "${PLATFORM}" in copilot|codex|pi|paseo|all) ;; *) echo "Unknown platform: ${PLATFORM}" >&2; exit 2 ;; esac
 case "${VARIANT}" in standard|lb|all) ;; *) echo "Unknown variant: ${VARIANT}" >&2; exit 2 ;; esac
+case "${SCOPE}" in global|project) ;; *) echo "Unknown scope: ${SCOPE}" >&2; exit 2 ;; esac
+if [[ "${SCOPE}" == "global" && -n "${TARGET_DIR}" ]]; then
+  echo "--target-dir is only valid with --scope project." >&2
+  exit 2
+fi
+if [[ "${SCOPE}" == "project" ]]; then
+  if [[ "${PLATFORM}" == "all" ]]; then
+    echo "--platform all is not supported with --scope project; choose pi or paseo." >&2
+    exit 2
+  fi
+  case "${PLATFORM}" in
+    pi|paseo) ;;
+    *) echo "Platform '${PLATFORM}' does not support --scope project; choose pi or paseo." >&2; exit 2 ;;
+  esac
+fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_HOME="${MINIONS_HOME:-$HOME}"
+PROJECT_ROOT=""
+if [[ "${SCOPE}" == "project" ]]; then
+  project_candidate="${TARGET_DIR:-${INVOCATION_CWD}}"
+  [[ -d "${project_candidate}" ]] || { echo "Project target directory not found: ${project_candidate}" >&2; exit 1; }
+  PROJECT_ROOT="$(cd "${project_candidate}" && pwd -P)"
+fi
 CORE="${ROOT}/skills/core"
 LB_PROFILE="${ROOT}/skills/lb"
 MANAGED_MARKER="# managed-by: copilot-minions"
@@ -43,11 +80,25 @@ AGENT_BACKUPS=()
 NEW_AGENT_TARGETS=()
 OBSOLETE_AGENT_TARGETS=()
 COMMIT_STARTED=0
+LOCK_PATH=""
+LOCK_ACQUIRED=0
 
 selected_platform() { [[ "${PLATFORM}" == "$1" || "${PLATFORM}" == "all" ]]; }
 selected_pi_host() { selected_platform pi || selected_platform paseo; }
 selected_variant() { [[ "${VARIANT}" == "$1" || "${VARIANT}" == "all" ]]; }
 require_directory() { [[ -d "$1" ]] || { echo "Source directory not found: $1" >&2; exit 1; }; }
+
+acquire_install_lock() {
+  local lock_root="${INSTALL_HOME}"
+  [[ "${SCOPE}" == "project" ]] && lock_root="${PROJECT_ROOT}"
+  mkdir -p "${lock_root}"
+  LOCK_PATH="${lock_root}/.copilot-minions-install.lock"
+  if ! mkdir "${LOCK_PATH}" 2>/dev/null; then
+    echo "Another copilot-minions installation is already in progress for ${lock_root}." >&2
+    exit 1
+  fi
+  LOCK_ACQUIRED=1
+}
 
 assert_pi_available() {
   command -v pi >/dev/null 2>&1 || {
@@ -59,7 +110,12 @@ assert_pi_available() {
 install_pi_package() {
   local package="$1"
   echo "Installing pinned Pi runtime: ${package}"
-  if ! pi install "${package}"; then
+  if [[ "${SCOPE}" == "project" ]]; then
+    if ! (cd "${PROJECT_ROOT}" && pi install -l "${package}"); then
+      echo "Unable to install ${package} in project ${PROJECT_ROOT}; no Minions resources were committed." >&2
+      exit 1
+    fi
+  elif ! pi install "${package}"; then
     echo "Unable to install ${package}; no Minions resources were committed." >&2
     exit 1
   fi
@@ -113,6 +169,7 @@ new_skill_stage() {
   mkdir -p "${parent}"
   stage="${parent}/.${name}.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
+  STAGE_PATHS+=("${stage}")
   cp -R "${CORE}/." "${stage}/"
   if [[ -n "${profile}" ]]; then
     require_directory "${profile}"
@@ -122,15 +179,14 @@ new_skill_stage() {
   [[ -f "${overlay}/models.md" ]] && cp "${overlay}/models.md" "${stage}/models.md"
   [[ -d "${ROOT}/scripts" ]] && cp -R "${ROOT}/scripts" "${stage}/scripts"
   [[ "${managed}" == "true" ]] && printf '%s\n' 'managed-by: copilot-minions' > "${stage}/.managed-by-copilot-minions"
-  STAGE_PATHS+=("${stage}")
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
   SKILL_BACKUPS+=("")
 }
 
 new_pi_extension_stage() {
+  local destination="$1"
   local source="${ROOT}/extensions/pi-minions"
-  local destination="${INSTALL_HOME}/.pi/agent/extensions/pi-minions"
   require_directory "${source}"
   assert_managed_pi_directory "${destination}"
   local parent stage
@@ -138,16 +194,16 @@ new_pi_extension_stage() {
   mkdir -p "${parent}"
   stage="${parent}/.pi-minions.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
-  cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
+  cp -R "${source}/." "${stage}/"
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
   SKILL_BACKUPS+=("")
 }
 
 new_pi_agents_stage() {
+  local destination="$1"
   local source="${ROOT}/extensions/pi-minions/agents"
-  local destination="${INSTALL_HOME}/.pi/agent/agents/copilot-minions"
   require_directory "${source}"
   assert_managed_pi_directory "${destination}"
   local parent stage
@@ -155,8 +211,8 @@ new_pi_agents_stage() {
   mkdir -p "${parent}"
   stage="${parent}/.copilot-minions-agents.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
-  cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
+  cp -R "${source}/." "${stage}/"
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
   SKILL_BACKUPS+=("")
@@ -224,7 +280,8 @@ add_variant_stages() {
   if selected_pi_host; then
     name="pi-minions${suffix}"
     overlay="${ROOT}/skills/${name}"
-    destination="${INSTALL_HOME}/.pi/agent/skills/${name}"
+    local destination="${INSTALL_HOME}/.pi/agent/skills/${name}"
+    [[ "${SCOPE}" == "project" ]] && destination="${PROJECT_ROOT}/.pi/skills/${name}"
     assert_managed_pi_directory "${destination}"
     new_skill_stage "${name}" "${overlay}" "${profile}" "${destination}" true
   fi
@@ -263,6 +320,10 @@ cleanup() {
       fi
     done
   fi
+  if [[ ${LOCK_ACQUIRED} -eq 1 && -d "${LOCK_PATH}" ]]; then
+    rmdir "${LOCK_PATH}" 2>/dev/null || true
+    LOCK_ACQUIRED=0
+  fi
   return 0
 }
 
@@ -278,9 +339,17 @@ trap cleanup EXIT
 require_directory "${CORE}"
 selected_platform codex && assert_codex_models
 selected_pi_host && assert_pi_available
+acquire_install_lock
 if selected_pi_host; then
-  new_pi_extension_stage
-  new_pi_agents_stage
+  if [[ "${SCOPE}" == "project" ]]; then
+    new_pi_extension_stage "${PROJECT_ROOT}/.pi/extensions/pi-minions"
+    if selected_platform pi; then
+      new_pi_agents_stage "${PROJECT_ROOT}/.pi/agents/copilot-minions"
+    fi
+  else
+    new_pi_extension_stage "${INSTALL_HOME}/.pi/agent/extensions/pi-minions"
+    new_pi_agents_stage "${INSTALL_HOME}/.pi/agent/agents/copilot-minions"
+  fi
 fi
 selected_variant standard && add_variant_stages standard
 selected_variant lb && add_variant_stages lb
@@ -340,7 +409,12 @@ if [[ ${#AGENT_BACKUPS[@]} -gt 0 ]]; then
   done
 fi
 
-echo "Installed platform: ${PLATFORM}; variant: ${VARIANT}"
+if [[ "${SCOPE}" == "project" ]]; then
+  echo "Installed platform: ${PLATFORM}; variant: ${VARIANT}; scope: project"
+  echo "  target: ${PROJECT_ROOT}"
+else
+  echo "Installed platform: ${PLATFORM}; variant: ${VARIANT}"
+fi
 for destination in "${SKILL_DESTS[@]}"; do echo "  ${destination}"; done
 selected_platform codex && echo "  ${INSTALL_HOME}/.codex/agents (managed minions agents)"
 selected_platform pi && echo "  ${PI_SUBAGENTS_PACKAGE} (pinned Pi worker runtime)"
@@ -348,7 +422,10 @@ selected_platform paseo && echo "  ${PI_MCP_ADAPTER_PACKAGE} (pinned Paseo MCP b
 echo
 
 UPDATER="${ROOT}/scripts/update-disciplines.sh"
-if [[ -f "${UPDATER}" ]]; then
+if [[ "${SCOPE}" == "project" ]]; then
+  echo "Skipping discipline update for project scope; project-local Minions skills are self-contained."
+  echo
+elif [[ -f "${UPDATER}" ]]; then
   echo "Updating discipline skills..."
   updater_platform="${PLATFORM}"
   [[ "${updater_platform}" == "paseo" ]] && updater_platform="pi"

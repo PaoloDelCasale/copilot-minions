@@ -3,13 +3,18 @@ param(
     [ValidateSet('copilot', 'codex', 'pi', 'paseo', 'all')]
     [string]$Platform = 'copilot',
     [ValidateSet('standard', 'lb', 'all')]
-    [string]$Variant = 'standard'
+    [string]$Variant = 'standard',
+    [ValidateSet('global', 'project')]
+    [string]$Scope = 'global',
+    [string]$TargetDirectory
 )
 
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installHome = if ($env:MINIONS_HOME) { $env:MINIONS_HOME } else { $HOME }
+$targetDirectorySpecified = $PSBoundParameters.ContainsKey('TargetDirectory')
+$projectRoot = $null
 $core = Join-Path $root 'skills\core'
 $lbProfile = Join-Path $root 'skills\lb'
 $managedMarker = '# managed-by: copilot-minions'
@@ -32,6 +37,78 @@ $agentBackups = @()
 $newAgentPaths = @()
 $obsoleteAgentPaths = @()
 $transactionStarted = $false
+$installLock = $null
+
+function Assert-InstallSelection {
+    if ($Scope -eq 'global') {
+        if ($script:targetDirectorySpecified) {
+            throw '-TargetDirectory is valid only with -Scope project.'
+        }
+        return
+    }
+    if ($Platform -eq 'all') {
+        throw '-Platform all is not supported with -Scope project; select pi or paseo explicitly.'
+    }
+    if ($Platform -notin @('pi', 'paseo')) {
+        throw "Platform '$Platform' is not supported with -Scope project; supported platforms: pi, paseo."
+    }
+}
+
+function Resolve-ProjectRoot {
+    $candidate = if ($script:targetDirectorySpecified) {
+        $TargetDirectory
+    } else {
+        (Get-Location).Path
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
+        throw "Project target directory not found: $candidate"
+    }
+    return (Resolve-Path -LiteralPath $candidate).Path
+}
+
+function Get-PiResourceRoot {
+    if ($Scope -eq 'project') {
+        return Join-Path $script:projectRoot '.pi'
+    }
+    return Join-Path $installHome '.pi\agent'
+}
+
+function Enter-InstallLock {
+    $identityRoot = if ($Scope -eq 'project') { $script:projectRoot } else { $installHome }
+    $identity = "$Scope|$identityRoot"
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($identity.ToLowerInvariant()))
+    } finally {
+        $sha.Dispose()
+    }
+    $hash = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    $mutexName = "copilot-minions-install-$hash"
+    $mutex = [System.Threading.Mutex]::new($false, $mutexName)
+    try {
+        try {
+            $acquired = $mutex.WaitOne([TimeSpan]::FromSeconds(30))
+        } catch [System.Threading.AbandonedMutexException] {
+            $acquired = $true
+        }
+        if (-not $acquired) {
+            throw "Timed out waiting for another Minions installation in: $identityRoot"
+        }
+        return $mutex
+    } catch {
+        $mutex.Dispose()
+        throw
+    }
+}
+
+function Exit-InstallLock($mutex) {
+    if ($null -eq $mutex) { return }
+    try {
+        $mutex.ReleaseMutex()
+    } finally {
+        $mutex.Dispose()
+    }
+}
 
 function Test-Platform([string]$name) {
     return $Platform -eq $name -or $Platform -eq 'all'
@@ -59,8 +136,19 @@ function Assert-PiAvailable {
 
 function Install-PiPackage([string]$package) {
     Write-Host "Installing pinned Pi runtime: $package"
-    & pi install $package
-    if ($LASTEXITCODE -ne 0) {
+    if ($Scope -eq 'project') {
+        Push-Location -LiteralPath $script:projectRoot
+        try {
+            & pi install -l $package
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+    } else {
+        & pi install $package
+        $exitCode = $LASTEXITCODE
+    }
+    if ($exitCode -ne 0) {
         throw "Unable to install $package; no Minions resources were committed."
     }
 }
@@ -134,6 +222,11 @@ function New-SkillStage(
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $stage = Join-Path $parent ".$name.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    $script:stagedSkills += [pscustomobject]@{
+        Name = $name
+        Stage = $stage
+        Destination = $destination
+    }
 
     Copy-Item -Recurse -Force (Join-Path $core '*') $stage
     if ($profile) {
@@ -152,48 +245,42 @@ function New-SkillStage(
     if ($managed) {
         Set-Content -LiteralPath (Join-Path $stage '.managed-by-copilot-minions') -Value 'managed-by: copilot-minions'
     }
-
-    $script:stagedSkills += [pscustomobject]@{
-        Name = $name
-        Stage = $stage
-        Destination = $destination
-    }
 }
 
 function New-PiExtensionStage {
     $source = Join-Path $root 'extensions\pi-minions'
-    $destination = Join-Path $installHome '.pi\agent\extensions\pi-minions'
+    $destination = Join-Path (Get-PiResourceRoot) 'extensions\pi-minions'
     Assert-Directory $source
     Assert-ManagedPiDirectory $destination
     $parent = Split-Path -Parent $destination
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $stage = Join-Path $parent ".pi-minions.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
-    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
     $script:stagedSkills += [pscustomobject]@{
         Name = 'pi-minions-extension'
         Stage = $stage
         Destination = $destination
     }
+    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
+    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
 }
 
 function New-PiAgentsStage {
     $source = Join-Path $root 'extensions\pi-minions\agents'
-    $destination = Join-Path $installHome '.pi\agent\agents\copilot-minions'
+    $destination = Join-Path (Get-PiResourceRoot) 'agents\copilot-minions'
     Assert-Directory $source
     Assert-ManagedPiDirectory $destination
     $parent = Split-Path -Parent $destination
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $stage = Join-Path $parent ".copilot-minions-agents.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
-    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
     $script:stagedSkills += [pscustomobject]@{
         Name = 'pi-minions-agents'
         Stage = $stage
         Destination = $destination
     }
+    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
+    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
 }
 
 function New-AgentStage([string]$packageName, [string]$overlay) {
@@ -203,6 +290,7 @@ function New-AgentStage([string]$packageName, [string]$overlay) {
     New-Item -ItemType Directory -Force -Path $agentsDirectory | Out-Null
     $stage = Join-Path $agentsDirectory ".$packageName.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    $script:agentStages += [pscustomobject]@{ Stage = $stage; Directory = $agentsDirectory }
 
     $agentNames = @()
     foreach ($file in Get-ChildItem -LiteralPath $source -Filter '*.toml' -File) {
@@ -226,7 +314,6 @@ function New-AgentStage([string]$packageName, [string]$overlay) {
     }
     @($managedMarker) + ($agentNames | Sort-Object) |
         Set-Content -LiteralPath (Join-Path $stage $manifestName)
-    $script:agentStages += [pscustomobject]@{ Stage = $stage; Directory = $agentsDirectory }
 }
 
 function Add-VariantStages([string]$variantName) {
@@ -247,7 +334,7 @@ function Add-VariantStages([string]$variantName) {
     if (Test-PiHost) {
         $name = "pi-minions$suffix"
         $overlay = Join-Path $root "skills\$name"
-        $destination = Join-Path $installHome ".pi\agent\skills\$name"
+        $destination = Join-Path (Get-PiResourceRoot) "skills\$name"
         Assert-ManagedPiDirectory $destination
         New-SkillStage $name $overlay $profile $destination $true
     }
@@ -316,16 +403,25 @@ function Undo-Transaction {
     }
 }
 
+Assert-InstallSelection
+if ($Scope -eq 'project') {
+    $projectRoot = Resolve-ProjectRoot
+}
 Assert-Directory $core
+if (Test-Platform 'codex') {
+    Assert-CodexModels
+}
+if (Test-PiHost) {
+    Assert-PiAvailable
+}
 
 try {
-    if (Test-Platform 'codex') {
-        Assert-CodexModels
-    }
+    $installLock = Enter-InstallLock
     if (Test-PiHost) {
-        Assert-PiAvailable
         New-PiExtensionStage
-        New-PiAgentsStage
+        if ($Scope -eq 'global' -or (Test-Platform 'pi')) {
+            New-PiAgentsStage
+        }
     }
     if (Test-Variant 'standard') {
         Add-VariantStages 'standard'
@@ -356,6 +452,7 @@ try {
             Remove-Item -Recurse -Force -LiteralPath $stage.Stage
         }
     }
+    Exit-InstallLock $installLock
 }
 
 foreach ($entry in $skillBackups) {
@@ -365,7 +462,12 @@ foreach ($entry in $agentBackups) {
     Remove-Item -Force -LiteralPath $entry.Backup -ErrorAction SilentlyContinue
 }
 
-Write-Host "Installed platform: $Platform; variant: $Variant"
+if ($Scope -eq 'project') {
+    Write-Host "Installed platform: $Platform; variant: $Variant; scope: project"
+    Write-Host "  Project target: $projectRoot"
+} else {
+    Write-Host "Installed platform: $Platform; variant: $Variant"
+}
 foreach ($skill in $stagedSkills) {
     Write-Host "  $($skill.Destination)"
 }
@@ -381,7 +483,7 @@ if (Test-Platform 'paseo') {
 Write-Host ''
 
 $updater = Join-Path $root 'scripts\update-disciplines.ps1'
-if (Test-Path -LiteralPath $updater) {
+if ($Scope -eq 'global' -and (Test-Path -LiteralPath $updater)) {
     Write-Host 'Updating discipline skills...'
     try {
         $updaterPlatform = if ($Platform -eq 'paseo') { 'pi' } else { $Platform }
