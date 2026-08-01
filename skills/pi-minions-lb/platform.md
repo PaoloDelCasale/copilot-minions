@@ -15,9 +15,9 @@ model. Use the documented `routeOverride` values for mechanical judgment and the
 escalation ladder. After spawning background work, end the turn immediately and do
 not poll `minions_read`. After a completion notification, read the worker result,
 update the board, and dispatch newly unblocked work. Never exceed six in-flight workers.
-The extension also enforces twelve launches. After eight triaged results it accepts
+The extension also enforces twenty launches. After eight triaged results it accepts
 only already-boarded closure work whose spawn sets `budgetClass: "closure"`; after
-twelve results it rejects every new dispatch.
+twenty results it rejects every new dispatch.
 
 Inside Pi, this adapter takes precedence over the Codex adapter discovered from
 `~/.agents/skills`. Workers never interview the user; they return
