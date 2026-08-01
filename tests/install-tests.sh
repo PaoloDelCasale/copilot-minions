@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMP="$(mktemp -d)"
+TEMP="$(cd "${TEMP}" && pwd -P)"
 trap 'rm -rf "${TEMP}"' EXIT
 
 export MINIONS_HOME="${TEMP}/home"
