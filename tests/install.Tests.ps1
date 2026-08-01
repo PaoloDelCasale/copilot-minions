@@ -71,7 +71,9 @@ if "%1"=="--list-models" (
   )
 )
 if "%1"=="install" (
-  echo %2>>"%MINIONS_TEST_PI_INSTALL_LOG%"
+  echo %CD%^|%*>>"%MINIONS_TEST_PI_INSTALL_LOG%"
+  if "%MINIONS_TEST_PI_DELAY%"=="1" ping -n 2 127.0.0.1 >nul
+  if "%MINIONS_TEST_PI_FAIL%"=="1" exit /b 23
 )
 exit /b 0
 '@ | Set-Content -LiteralPath (Join-Path $bin 'pi.cmd')
@@ -163,6 +165,208 @@ exit /b 0
     Assert-True ($piLbModels.Contains('grok-4.5:high')) 'LB Pi documents Copilot Grok overrides'
     Assert-True (@(Get-ChildItem -LiteralPath $agentDirectory -Filter 'codex-minions*.toml').Count -eq 12) 'Both Codex variants install twelve agents'
     Assert-True (Test-Path (Join-Path $agentDirectory '.codex-minions-lb-manifest')) 'LB agent manifest is installed'
+
+    # Project-scoped Paseo uses the invocation directory, keeps all resources local,
+    # and carries both variants plus the Paseo role prompts without global updates.
+    $projectPaseo = Join-Path $temp 'project-paseo'
+    New-Item -ItemType Directory -Force -Path $projectPaseo | Out-Null
+    $globalProjectSentinel = Join-Path $piExtension 'project-scope-must-not-touch-global'
+    Set-Content -LiteralPath $globalProjectSentinel -Value 'keep'
+    Clear-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG
+    Push-Location -LiteralPath $projectPaseo
+    try {
+        & (Join-Path $root 'install.ps1') -Platform paseo -Variant all -Scope project | Out-Null
+    } finally {
+        Pop-Location
+    }
+    $projectPaseoPi = Join-Path $projectPaseo '.pi'
+    $projectPaseoExtension = Join-Path $projectPaseoPi 'extensions\pi-minions'
+    $projectPaseoSkill = Join-Path $projectPaseoPi 'skills\pi-minions'
+    $projectPaseoLbSkill = Join-Path $projectPaseoPi 'skills\pi-minions-lb'
+    Assert-True (Test-Path (Join-Path $projectPaseoExtension 'index.ts')) 'Project Paseo extension is installed under .pi/extensions'
+    Assert-True (Test-Path (Join-Path $projectPaseoExtension '.managed-by-copilot-minions')) 'Project Paseo extension has its ownership marker'
+    Assert-True (Test-Path (Join-Path $projectPaseoExtension 'agents\pi-minions-reviewer.md')) 'Paseo role prompts stay beside the project extension'
+    Assert-True (-not (Test-Path (Join-Path $projectPaseoPi 'agents'))) 'Project Paseo does not create .pi/agents'
+    foreach ($skillPath in @($projectPaseoSkill, $projectPaseoLbSkill)) {
+        Assert-True (Test-Path (Join-Path $skillPath 'SKILL.md')) "Project skill is installed: $skillPath"
+        Assert-True (Test-Path (Join-Path $skillPath 'frontier.md')) "Project skill is self-contained: $skillPath"
+        Assert-True (Test-Path (Join-Path $skillPath 'scripts\update-disciplines.ps1')) "Project skill includes helper scripts: $skillPath"
+        Assert-True (Test-Path (Join-Path $skillPath '.managed-by-copilot-minions')) "Project skill has its ownership marker: $skillPath"
+    }
+    Assert-True (-not (Test-Path (Join-Path $projectPaseoPi 'skills\implement'))) 'Project scope skips the global discipline updater'
+    Assert-True (Test-Path $globalProjectSentinel) 'Project Paseo leaves the global Pi extension untouched'
+    $paseoProjectInstall = Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw
+    Assert-True ($paseoProjectInstall.Contains('install -l npm:pi-mcp-adapter@2.16.0')) 'Project Paseo uses the pinned local MCP adapter install'
+    Assert-True ($paseoProjectInstall.ToLowerInvariant().Contains($projectPaseo.ToLowerInvariant())) 'Project Paseo invokes pi from the target directory'
+
+    Set-Content -LiteralPath (Join-Path $projectPaseoExtension 'idempotence-sentinel') -Value 'remove-me'
+    Push-Location -LiteralPath $projectPaseo
+    try {
+        & (Join-Path $root 'install.ps1') -Platform paseo -Variant all -Scope project | Out-Null
+    } finally {
+        Pop-Location
+    }
+    Assert-True (-not (Test-Path (Join-Path $projectPaseoExtension 'idempotence-sentinel'))) 'Project Paseo reinstall atomically replaces managed resources'
+    Assert-True (@(Get-ChildItem -LiteralPath (Join-Path $projectPaseoExtension 'agents') -Filter 'pi-minions-*.md').Count -eq 7) 'Project Paseo reinstall is idempotent'
+
+    # Project-scoped ordinary Pi uses an explicit target and the verified local
+    # companion-agent directory supported by pi-subagents 0.37.2.
+    $projectPi = Join-Path $temp 'project-pi'
+    New-Item -ItemType Directory -Force -Path $projectPi | Out-Null
+    Clear-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG
+    Push-Location -LiteralPath $temp
+    try {
+        & (Join-Path $root 'install.ps1') -Platform pi -Scope project -TargetDirectory 'project-pi' | Out-Null
+    } finally {
+        Pop-Location
+    }
+    $projectPiRoot = Join-Path $projectPi '.pi'
+    $projectPiExtension = Join-Path $projectPiRoot 'extensions\pi-minions'
+    $projectPiAgents = Join-Path $projectPiRoot 'agents\copilot-minions'
+    $projectPiSkill = Join-Path $projectPiRoot 'skills\pi-minions'
+    Assert-True (Test-Path (Join-Path $projectPiExtension 'index.ts')) 'Project Pi extension is installed'
+    Assert-True (Test-Path (Join-Path $projectPiAgents '.managed-by-copilot-minions')) 'Project Pi companion agents have an ownership marker'
+    Assert-True (Test-Path (Join-Path $projectPiAgents 'pi-minions-review-axis.md')) 'Project Pi companion agents are installed recursively under .pi/agents'
+    Assert-True (@(Get-ChildItem -LiteralPath $projectPiAgents -Filter 'pi-minions-*.md').Count -eq 7) 'Project Pi installs all companion agents'
+    Assert-True (Test-Path (Join-Path $projectPiSkill 'control.md')) 'Project Pi skill is self-contained'
+    Assert-True (-not (Test-Path (Join-Path $projectPiRoot 'skills\implement'))) 'Project Pi also skips the global discipline updater'
+    Assert-True (Test-Path $globalProjectSentinel) 'Project Pi leaves global Pi resources untouched'
+    $piProjectInstall = Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw
+    Assert-True ($piProjectInstall.Contains('install -l npm:pi-subagents@0.37.2')) 'Project Pi uses the pinned local companion runtime install'
+    Assert-True ($piProjectInstall.ToLowerInvariant().Contains($projectPi.ToLowerInvariant())) 'TargetDirectory controls the pi install working directory'
+
+    # A package failure happens before commit and leaves the previous managed tree intact.
+    $projectPackageSentinel = Join-Path $projectPiSkill 'package-failure-sentinel'
+    Set-Content -LiteralPath $projectPackageSentinel -Value 'keep'
+    $env:MINIONS_TEST_PI_FAIL = '1'
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform pi -Scope project -TargetDirectory $projectPi | Out-Null
+    } catch {
+        $failed = $true
+    } finally {
+        Remove-Item Env:MINIONS_TEST_PI_FAIL -ErrorAction SilentlyContinue
+    }
+    Assert-True $failed 'Project Pi package failure is surfaced'
+    Assert-True (Test-Path $projectPackageSentinel) 'Project Pi package failure commits no managed resources'
+    Assert-True (@(Get-ChildItem -LiteralPath $projectPiRoot -Recurse -Force | Where-Object { $_.Name -like '*.stage.*' }).Count -eq 0) 'Project package failure cleans staging directories'
+
+    # Inject a project commit failure after the extension has moved and verify rollback.
+    $projectExtensionRollbackSentinel = Join-Path $projectPiExtension 'rollback-sentinel'
+    $projectSkillRollbackSentinel = Join-Path $projectPiSkill 'rollback-sentinel'
+    Set-Content -LiteralPath $projectExtensionRollbackSentinel -Value 'keep'
+    Set-Content -LiteralPath $projectSkillRollbackSentinel -Value 'keep'
+    $global:MinionsFailMoveOnce = $true
+    $global:MinionsFailMoveDestination = $projectPiSkill
+    function global:Move-Item {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)][string]$LiteralPath,
+            [Parameter(Mandatory)][string]$Destination
+        )
+        if ($global:MinionsFailMoveOnce -and $Destination -eq $global:MinionsFailMoveDestination) {
+            $global:MinionsFailMoveOnce = $false
+            throw 'Injected project Move-Item failure'
+        }
+        Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination
+    }
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform pi -Scope project -TargetDirectory $projectPi | Out-Null
+    } catch {
+        $failed = $true
+    } finally {
+        Remove-Item Function:\global:Move-Item -ErrorAction SilentlyContinue
+        Remove-Variable MinionsFailMoveOnce -Scope Global -ErrorAction SilentlyContinue
+        Remove-Variable MinionsFailMoveDestination -Scope Global -ErrorAction SilentlyContinue
+    }
+    Assert-True $failed 'Injected project commit failure is surfaced'
+    Assert-True (Test-Path $projectExtensionRollbackSentinel) 'Project extension is restored after rollback'
+    Assert-True (Test-Path $projectSkillRollbackSentinel) 'Project skill is restored after rollback'
+
+    # Every project resource rejects unmanaged collisions before invoking pi.
+    foreach ($collision in @(
+        [pscustomobject]@{ Platform = 'paseo'; RelativePath = 'extensions\pi-minions' },
+        [pscustomobject]@{ Platform = 'pi'; RelativePath = 'agents\copilot-minions' },
+        [pscustomobject]@{ Platform = 'pi'; RelativePath = 'skills\pi-minions' }
+    )) {
+        $collisionTarget = Join-Path $temp "collision-$($collision.Platform)-$([Guid]::NewGuid().ToString('N'))"
+        $collisionPath = Join-Path (Join-Path $collisionTarget '.pi') $collision.RelativePath
+        New-Item -ItemType Directory -Force -Path $collisionPath | Out-Null
+        Set-Content -LiteralPath (Join-Path $collisionPath 'user-owned') -Value 'keep'
+        Clear-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG
+        $failed = $false
+        try {
+            & (Join-Path $root 'install.ps1') -Platform $collision.Platform -Scope project -TargetDirectory $collisionTarget | Out-Null
+        } catch {
+            $failed = $true
+        }
+        Assert-True $failed "Unmanaged project collision is rejected: $($collision.RelativePath)"
+        Assert-True (Test-Path (Join-Path $collisionPath 'user-owned')) "Unmanaged project content survives: $($collision.RelativePath)"
+        Assert-True ((Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw).Length -eq 0) "Collision is detected before pi install: $($collision.RelativePath)"
+    }
+
+    # Unsupported project combinations fail before creating .pi or touching globals.
+    foreach ($unsupportedPlatform in @('copilot', 'codex', 'all')) {
+        $unsupportedTarget = Join-Path $temp "unsupported-$unsupportedPlatform"
+        New-Item -ItemType Directory -Force -Path $unsupportedTarget | Out-Null
+        $failed = $false
+        $failureMessage = ''
+        try {
+            & (Join-Path $root 'install.ps1') -Platform $unsupportedPlatform -Scope project -TargetDirectory $unsupportedTarget | Out-Null
+        } catch {
+            $failed = $true
+            $failureMessage = $_.Exception.Message
+        }
+        Assert-True $failed "Project platform fails clearly: $unsupportedPlatform"
+        Assert-True ($failureMessage -match 'not supported|select pi or paseo') "Project platform explains the supported selection: $unsupportedPlatform"
+        Assert-True (-not (Test-Path (Join-Path $unsupportedTarget '.pi'))) "Unsupported project platform creates nothing: $unsupportedPlatform"
+    }
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform paseo -Scope global -TargetDirectory $projectPaseo | Out-Null
+    } catch {
+        $failed = $true
+    }
+    Assert-True $failed 'TargetDirectory is rejected for global scope'
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Platform paseo -Scope project -TargetDirectory (Join-Path $temp 'missing-project') | Out-Null
+    } catch {
+        $failed = $true
+    }
+    Assert-True $failed 'A missing project target is rejected'
+
+    # Two installers for one target serialize through the named install lock.
+    if (Get-Command Start-Job -ErrorAction SilentlyContinue) {
+        $concurrentProject = Join-Path $temp 'project-concurrent'
+        New-Item -ItemType Directory -Force -Path $concurrentProject | Out-Null
+        $env:MINIONS_TEST_PI_DELAY = '1'
+        $jobs = @(
+            Start-Job -ScriptBlock {
+                param($installer, $target)
+                & $installer -Platform paseo -Scope project -TargetDirectory $target
+            } -ArgumentList (Join-Path $root 'install.ps1'), $concurrentProject
+            Start-Job -ScriptBlock {
+                param($installer, $target)
+                & $installer -Platform paseo -Scope project -TargetDirectory $target
+            } -ArgumentList (Join-Path $root 'install.ps1'), $concurrentProject
+        )
+        try {
+            $jobs | Wait-Job | Out-Null
+            foreach ($job in $jobs) {
+                Receive-Job -Job $job -ErrorAction Stop | Out-Null
+                Assert-True ($job.State -eq 'Completed') 'Concurrent project installer completed successfully'
+            }
+        } finally {
+            $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:MINIONS_TEST_PI_DELAY -ErrorAction SilentlyContinue
+        }
+        $concurrentPi = Join-Path $concurrentProject '.pi'
+        Assert-True (Test-Path (Join-Path $concurrentPi 'extensions\pi-minions\index.ts')) 'Concurrent install leaves a complete extension'
+        Assert-True (Test-Path (Join-Path $concurrentPi 'skills\pi-minions\SKILL.md')) 'Concurrent install leaves a complete skill'
+        Assert-True (@(Get-ChildItem -LiteralPath $concurrentPi -Recurse -Force | Where-Object { $_.Name -like '*.stage.*' -or $_.Name -like '*.backup.*' }).Count -eq 0) 'Concurrent install leaves no transaction artifacts'
+    }
 
     $codexRollbackSentinel = Join-Path $codexSkill 'rollback-sentinel'
     $copilotRollbackSentinel = Join-Path $copilotSkill 'rollback-sentinel'
@@ -285,6 +489,14 @@ exit /b 0
     }
     Assert-True $failed 'Invalid variant is rejected'
 
+    $failed = $false
+    try {
+        & (Join-Path $root 'install.ps1') -Scope invalid | Out-Null
+    } catch {
+        $failed = $true
+    }
+    Assert-True $failed 'Invalid scope is rejected'
+
     $env:MINIONS_TEST_MODELS = 'preview'
     $failed = $false
     try {
@@ -302,6 +514,8 @@ exit /b 0
     Remove-Item Env:MINIONS_TEST_MODELS -ErrorAction SilentlyContinue
     Remove-Item Env:MINIONS_TEST_PI_MODELS -ErrorAction SilentlyContinue
     Remove-Item Env:MINIONS_TEST_PI_INSTALL_LOG -ErrorAction SilentlyContinue
+    Remove-Item Env:MINIONS_TEST_PI_FAIL -ErrorAction SilentlyContinue
+    Remove-Item Env:MINIONS_TEST_PI_DELAY -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $temp) {
         Remove-Item -Recurse -Force -LiteralPath $temp
     }
