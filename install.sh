@@ -169,6 +169,7 @@ new_skill_stage() {
   mkdir -p "${parent}"
   stage="${parent}/.${name}.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
+  STAGE_PATHS+=("${stage}")
   cp -R "${CORE}/." "${stage}/"
   if [[ -n "${profile}" ]]; then
     require_directory "${profile}"
@@ -178,7 +179,6 @@ new_skill_stage() {
   [[ -f "${overlay}/models.md" ]] && cp "${overlay}/models.md" "${stage}/models.md"
   [[ -d "${ROOT}/scripts" ]] && cp -R "${ROOT}/scripts" "${stage}/scripts"
   [[ "${managed}" == "true" ]] && printf '%s\n' 'managed-by: copilot-minions' > "${stage}/.managed-by-copilot-minions"
-  STAGE_PATHS+=("${stage}")
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
   SKILL_BACKUPS+=("")
@@ -194,8 +194,8 @@ new_pi_extension_stage() {
   mkdir -p "${parent}"
   stage="${parent}/.pi-minions.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
-  cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
+  cp -R "${source}/." "${stage}/"
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
   SKILL_BACKUPS+=("")
@@ -211,8 +211,8 @@ new_pi_agents_stage() {
   mkdir -p "${parent}"
   stage="${parent}/.copilot-minions-agents.stage.${TRANSACTION_ID}"
   mkdir -p "${stage}"
-  cp -R "${source}/." "${stage}/"
   STAGE_PATHS+=("${stage}")
+  cp -R "${source}/." "${stage}/"
   SKILL_STAGES+=("${stage}")
   SKILL_DESTS+=("${destination}")
   SKILL_BACKUPS+=("")
@@ -337,9 +337,9 @@ trap on_error ERR
 trap cleanup EXIT
 
 require_directory "${CORE}"
-acquire_install_lock
 selected_platform codex && assert_codex_models
 selected_pi_host && assert_pi_available
+acquire_install_lock
 if selected_pi_host; then
   if [[ "${SCOPE}" == "project" ]]; then
     new_pi_extension_stage "${PROJECT_ROOT}/.pi/extensions/pi-minions"

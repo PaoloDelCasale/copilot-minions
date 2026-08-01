@@ -222,6 +222,11 @@ function New-SkillStage(
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $stage = Join-Path $parent ".$name.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    $script:stagedSkills += [pscustomobject]@{
+        Name = $name
+        Stage = $stage
+        Destination = $destination
+    }
 
     Copy-Item -Recurse -Force (Join-Path $core '*') $stage
     if ($profile) {
@@ -240,12 +245,6 @@ function New-SkillStage(
     if ($managed) {
         Set-Content -LiteralPath (Join-Path $stage '.managed-by-copilot-minions') -Value 'managed-by: copilot-minions'
     }
-
-    $script:stagedSkills += [pscustomobject]@{
-        Name = $name
-        Stage = $stage
-        Destination = $destination
-    }
 }
 
 function New-PiExtensionStage {
@@ -257,13 +256,13 @@ function New-PiExtensionStage {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $stage = Join-Path $parent ".pi-minions.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
-    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
     $script:stagedSkills += [pscustomobject]@{
         Name = 'pi-minions-extension'
         Stage = $stage
         Destination = $destination
     }
+    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
+    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
 }
 
 function New-PiAgentsStage {
@@ -275,13 +274,13 @@ function New-PiAgentsStage {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $stage = Join-Path $parent ".copilot-minions-agents.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
-    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
     $script:stagedSkills += [pscustomobject]@{
         Name = 'pi-minions-agents'
         Stage = $stage
         Destination = $destination
     }
+    Copy-Item -Recurse -Force (Join-Path $source '*') $stage
+    Copy-Item -Force (Join-Path $source '.managed-by-copilot-minions') $stage
 }
 
 function New-AgentStage([string]$packageName, [string]$overlay) {
@@ -291,6 +290,7 @@ function New-AgentStage([string]$packageName, [string]$overlay) {
     New-Item -ItemType Directory -Force -Path $agentsDirectory | Out-Null
     $stage = Join-Path $agentsDirectory ".$packageName.stage.$transactionId"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    $script:agentStages += [pscustomobject]@{ Stage = $stage; Directory = $agentsDirectory }
 
     $agentNames = @()
     foreach ($file in Get-ChildItem -LiteralPath $source -Filter '*.toml' -File) {
@@ -314,7 +314,6 @@ function New-AgentStage([string]$packageName, [string]$overlay) {
     }
     @($managedMarker) + ($agentNames | Sort-Object) |
         Set-Content -LiteralPath (Join-Path $stage $manifestName)
-    $script:agentStages += [pscustomobject]@{ Stage = $stage; Directory = $agentsDirectory }
 }
 
 function Add-VariantStages([string]$variantName) {
@@ -463,9 +462,11 @@ foreach ($entry in $agentBackups) {
     Remove-Item -Force -LiteralPath $entry.Backup -ErrorAction SilentlyContinue
 }
 
-Write-Host "Installed platform: $Platform; variant: $Variant; scope: $Scope"
 if ($Scope -eq 'project') {
+    Write-Host "Installed platform: $Platform; variant: $Variant; scope: project"
     Write-Host "  Project target: $projectRoot"
+} else {
+    Write-Host "Installed platform: $Platform; variant: $Variant"
 }
 foreach ($skill in $stagedSkills) {
     Write-Host "  $($skill.Destination)"

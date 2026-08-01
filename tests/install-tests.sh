@@ -92,7 +92,19 @@ if [[ -n "${MINIONS_TEST_FAIL_MOVE_TARGET:-}" &&
 fi
 exec /bin/mv "$@"
 EOF
-chmod +x "${TEMP}/bin/codex" "${TEMP}/bin/copilot" "${TEMP}/bin/pi" "${TEMP}/bin/git" "${TEMP}/bin/mv"
+
+cat > "${TEMP}/bin/cp" <<'EOF'
+#!/usr/bin/env bash
+target="${!#}"
+if [[ -n "${MINIONS_TEST_FAIL_COPY_TARGET:-}" &&
+      "${target}" == *"${MINIONS_TEST_FAIL_COPY_TARGET}"* &&
+      ! -e "${MINIONS_TEST_FAIL_COPY_STATE}" ]]; then
+  : > "${MINIONS_TEST_FAIL_COPY_STATE}"
+  exit 92
+fi
+exec /bin/cp "$@"
+EOF
+chmod +x "${TEMP}/bin/codex" "${TEMP}/bin/copilot" "${TEMP}/bin/pi" "${TEMP}/bin/git" "${TEMP}/bin/mv" "${TEMP}/bin/cp"
 
 count_files() {
   local count=0 file
@@ -130,7 +142,12 @@ export MINIONS_TEST_MODELS=complete
 export MINIONS_TEST_PI_INSTALL_LOG="${TEMP}/pi-install.log"
 export MINIONS_TEST_PI_COMMAND_LOG="${TEMP}/pi-command.log"
 : > "${MINIONS_TEST_PI_COMMAND_LOG}"
-bash "${ROOT}/install.sh" --platform all >/dev/null
+GLOBAL_OUTPUT="$(bash "${ROOT}/install.sh" --platform all)"
+grep -Fxq 'Installed platform: all; variant: standard' <<<"${GLOBAL_OUTPUT}"
+! grep -Fq 'scope: global' <<<"${GLOBAL_OUTPUT}"
+grep -Fq '|install npm:pi-subagents@0.37.2' "${MINIONS_TEST_PI_COMMAND_LOG}"
+grep -Fq '|install npm:pi-mcp-adapter@2.16.0' "${MINIONS_TEST_PI_COMMAND_LOG}"
+! grep -Fq '|install -l ' "${MINIONS_TEST_PI_COMMAND_LOG}"
 
 COPILOT_SKILL="${MINIONS_HOME}/.copilot/skills/copilot-minions"
 CODEX_SKILL="${MINIONS_HOME}/.agents/skills/codex-minions"
@@ -230,6 +247,7 @@ grep -Fq 'gpt-5.6-luna:xhigh' "${PASEO_PROJECT_LB_SKILL}/models.md"
 [[ -f "${PASEO_PROJECT_EXTENSION}/.managed-by-copilot-minions" ]]
 [[ -f "${PASEO_PROJECT_SKILL}/.managed-by-copilot-minions" ]]
 [[ -f "${PASEO_PROJECT_LB_SKILL}/.managed-by-copilot-minions" ]]
+[[ ! -e "${PASEO_PROJECT}/.pi/agent" ]]
 [[ ! -e "${PASEO_PROJECT}/.pi/agents/copilot-minions" ]]
 [[ -f "${PASEO_PROJECT}/.pi/agents/user-owned/agent.md" ]]
 [[ ! -e "${PASEO_PROJECT}/.pi/skills/implement" ]]
@@ -264,6 +282,7 @@ PI_PROJECT_AGENTS="${PI_PROJECT}/.pi/agents/copilot-minions"
 [[ -f "${PI_PROJECT_AGENTS}/.managed-by-copilot-minions" ]]
 [[ -f "${PI_PROJECT_AGENTS}/pi-minions-reviewer.md" ]]
 [[ "$(count_files "${PI_PROJECT_AGENTS}"/pi-minions-*.md)" -eq 7 ]]
+[[ ! -e "${PI_PROJECT}/.pi/agent" ]]
 grep -Fxq "${PI_PROJECT}|install -l npm:pi-subagents@0.37.2" "${MINIONS_TEST_PI_COMMAND_LOG}"
 ! grep -Fq 'pi-mcp-adapter' "${MINIONS_TEST_PI_COMMAND_LOG}"
 [[ -f "${GLOBAL_PROJECT_SENTINEL}" ]]
@@ -320,6 +339,31 @@ fi
 [[ ! -s "${MINIONS_TEST_PI_COMMAND_LOG}" ]]
 assert_no_transaction_debris "${UNMANAGED_PI_PROJECT}"
 
+UNMANAGED_SKILL_PROJECT="${TEMP}/unmanaged-skill-project"
+mkdir -p "${UNMANAGED_SKILL_PROJECT}/.pi/skills/pi-minions"
+printf '%s\n' '# user-owned' > "${UNMANAGED_SKILL_PROJECT}/.pi/skills/pi-minions/SKILL.md"
+: > "${MINIONS_TEST_PI_COMMAND_LOG}"
+if (cd "${UNMANAGED_SKILL_PROJECT}" && bash "${ROOT}/install.sh" --platform pi --scope project >/dev/null 2>&1); then
+  echo 'Expected unmanaged project skill collision.' >&2
+  exit 1
+fi
+[[ ! -s "${MINIONS_TEST_PI_COMMAND_LOG}" ]]
+assert_no_transaction_debris "${UNMANAGED_SKILL_PROJECT}"
+
+# A staging failure is cleaned before the package command and leaves no debris.
+STAGING_FAILURE_PROJECT="${TEMP}/staging-failure-project"
+mkdir -p "${STAGING_FAILURE_PROJECT}"
+: > "${MINIONS_TEST_PI_COMMAND_LOG}"
+export MINIONS_TEST_FAIL_COPY_TARGET='/.pi/extensions/.pi-minions.stage.'
+export MINIONS_TEST_FAIL_COPY_STATE="${TEMP}/project-copy-failed"
+if (cd "${STAGING_FAILURE_PROJECT}" && bash "${ROOT}/install.sh" --platform paseo --scope project >/dev/null 2>&1); then
+  echo 'Expected injected project staging failure.' >&2
+  exit 1
+fi
+unset MINIONS_TEST_FAIL_COPY_TARGET MINIONS_TEST_FAIL_COPY_STATE
+[[ ! -s "${MINIONS_TEST_PI_COMMAND_LOG}" ]]
+assert_no_transaction_debris "${STAGING_FAILURE_PROJECT}"
+
 # The per-target lock prevents overlapping commits and is removed afterward.
 CONCURRENT_PROJECT="${TEMP}/concurrent-project"
 CONCURRENT_BLOCK="${TEMP}/concurrent-install"
@@ -358,6 +402,15 @@ expect_install_failure "Platform 'codex' does not support --scope project" --pla
 expect_install_failure '--target-dir is only valid with --scope project' --platform paseo --target-dir "${PASEO_PROJECT}"
 expect_install_failure 'Unknown scope: invalid' --platform paseo --scope invalid
 expect_install_failure 'Project target directory not found:' --platform paseo --scope project --target-dir "${TEMP}/missing-project"
+
+# A failed global preflight keeps the historical no-write behavior.
+PREFLIGHT_HOME="${TEMP}/preflight-home"
+if MINIONS_HOME="${PREFLIGHT_HOME}" MINIONS_TEST_MODELS=missing \
+  bash "${ROOT}/install.sh" --platform codex >/dev/null 2>&1; then
+  echo 'Expected isolated Codex preflight failure.' >&2
+  exit 1
+fi
+[[ ! -e "${PREFLIGHT_HOME}" ]]
 
 touch "${PI_EXTENSION}/catalog-sentinel"
 export MINIONS_TEST_PI_MODELS=missing-grok
@@ -403,5 +456,10 @@ if bash "${ROOT}/install.sh" --platform codex --variant lb >/dev/null 2>&1; then
   echo 'Expected near-match model IDs to fail.' >&2
   exit 1
 fi
+
+grep -Fq 'PROJECT_SCOPE_REF' "${ROOT}/README.md"
+grep -Fq 'bash "$SOURCE/install.sh" --platform paseo --scope project' "${ROOT}/README.md"
+grep -Fq "& (Join-Path \$source 'install.ps1') -Platform paseo -Scope project" "${ROOT}/README.md"
+! grep -Fq 'REF=13e5813' "${ROOT}/README.md"
 
 echo 'Bash installer smoke tests passed.'

@@ -66,18 +66,18 @@ side-by-side.
 
 ### Installation scope and destinations
 
-The installers above are **global-only**; they have no scope switch. `MINIONS_HOME`
-is an installer/test home override, not a project-scope mode. Scope support is:
+Both installers support `global` (the default) and `project` scopes. Omitting the
+scope preserves the existing global behavior and output. `MINIONS_HOME` remains only
+an installer/test home override; it is not a project-scope switch.
 
 | Scope | `pi` | `paseo` | `copilot` | `codex` | `all` |
 |-------|------|---------|-----------|---------|-------|
-| Global installer | Supported | Supported | Supported | Supported | Supported |
-| Project-local Worktree Setup below | Supported | Supported | Not implemented | Not implemented | Not supported |
+| Global (default) | Supported | Supported | Supported | Supported | Supported |
+| Project | Supported | Supported | Not supported | Not supported | Not supported |
 
-Therefore `--platform all`/`-Platform all` is global-only. Do not substitute the
-current worktree for `MINIONS_HOME`: that would create user-layout paths such as
-`.pi/agent/...`, not Pi's project paths. Project-local Copilot and Codex layouts are
-not claimed until their native discovery and companion-agent behavior are verified.
+Project scope targets the invocation directory unless `--target-dir`/
+`-TargetDirectory` names another existing directory. `all`, Copilot, and Codex are
+rejected in project scope before anything is written.
 
 Global destinations:
 
@@ -88,19 +88,24 @@ Global destinations:
 | Pi | `~/.pi/agent/skills/pi-minions[-lb]` | `~/.pi/agent/extensions/pi-minions`, `~/.pi/agent/agents/copilot-minions`, and `~/.pi/agent/npm/` |
 | Paseo + Pi | Same Pi skill and extension (`paseo-minions` is an alias) | `~/.pi/agent/npm/` contains the MCP adapter; worker prompts are read from `agents/` beside the extension, and workers are native Paseo children |
 
-Project-local Pi/Paseo destinations created by the Worktree Setup snippets:
+Project-local destinations:
 
-| Platform | Destinations in the current worktree |
-|----------|--------------------------------------|
-| Pi | `.pi/skills/pi-minions`, `.pi/extensions/pi-minions`, `.pi/agents/copilot-minions`, `.pi/settings.json`, `.pi/npm/` |
-| Paseo + Pi | `.pi/skills/pi-minions`, `.pi/extensions/pi-minions` (including its adjacent `agents/` prompts), `.pi/settings.json`, `.pi/npm/`; no `.pi/agents/copilot-minions` copy is needed |
+| Platform | Destinations under the target |
+|----------|-------------------------------|
+| Pi | `.pi/skills/pi-minions[-lb]`, `.pi/extensions/pi-minions`, `.pi/agents/copilot-minions`, `.pi/settings.json`, `.pi/npm/` |
+| Paseo + Pi | `.pi/skills/pi-minions[-lb]`, `.pi/extensions/pi-minions` (including adjacent `agents/` prompts), `.pi/settings.json`, `.pi/npm/`; no `.pi/agents/copilot-minions` copy |
 
-Pi's project scope is self-contained for Minions: `pi install -l` records the pinned
-runtime in `.pi/settings.json`, installs npm content under `.pi/npm/`, and
-`pi-subagents` recursively discovers companion definitions under
-`.pi/agents/copilot-minions/`. It does not write Minions resources to the user home.
-It is not a hermetic Pi profile: unrelated global Pi settings/resources remain
-inherited, and project resources/packages load only after the worktree is trusted.
+The project installer runs `pi install -l` from the resolved target, never creates
+`.pi/agent`, skips the global discipline updater, and refuses unmanaged destination
+collisions. Managed resources are staged and replaced transactionally, so reruns are
+idempotent and a failed commit rolls existing resources back. A per-target lock
+prevents overlapping installers.
+
+Pi's project scope is self-contained for Minions: the local package record is in
+`.pi/settings.json`, npm content is under `.pi/npm/`, and `pi-subagents` recursively
+discovers companion definitions under `.pi/agents/copilot-minions/`. It is not a
+hermetic Pi profile: unrelated global Pi settings/resources remain inherited, and
+project resources/packages load only after the worktree is trusted.
 
 Verified against Pi `@earendil-works/pi-coding-agent` **v0.82.1**
 ([package scope and npm destinations](https://github.com/earendil-works/pi/blob/v0.82.1/packages/coding-agent/docs/packages.md#L43-L65))
@@ -109,85 +114,68 @@ and `pi-subagents` **v0.37.2**
 [project directory construction](https://github.com/nicobailon/pi-subagents/blob/v0.37.2/src/agents/agents.ts#L1493-L1506), and
 [recursive project loading](https://github.com/nicobailon/pi-subagents/blob/v0.37.2/src/agents/agents.ts#L1537-L1588)).
 
-### Paseo Worktree Setup (project-local Pi)
+### Project-local Pi and Paseo
 
-Paste one of these into Paseo's Worktree Setup. It installs into the **current
-worktree** without invoking the global-only installers. It defaults to ordinary Pi;
-set `MINIONS_PLATFORM=paseo` to install the Paseo MCP adapter instead. This repository
-has no release tag yet, so `13e5813bcc4a3c6b80c83f45cc1451b80e1601f2` is an
-explicit placeholder pin; replace it only with a reviewed release tag or commit.
-Existing Minions destination directories are refused rather than overwritten.
+From an existing clone, install into the current directory (or add the target option
+shown below):
+
+```bash
+./install.sh --platform pi --scope project
+./install.sh --platform paseo --scope project
+./install.sh --platform pi --scope project --variant lb
+./install.sh --platform paseo --scope project --variant all --target-dir /path/to/project
+```
+
+```powershell
+./install.ps1 -Platform pi -Scope project
+./install.ps1 -Platform paseo -Scope project
+./install.ps1 -Platform pi -Scope project -Variant lb
+./install.ps1 -Platform paseo -Scope project -Variant all -TargetDirectory C:\path\to\project
+```
+
+`Variant` still defaults to `standard`; `lb` installs only the low-budget skill and
+`all` installs both variants side-by-side.
+
+### Paseo Worktree Setup (temporary pinned clone)
+
+Paste the matching snippet into Paseo's Worktree Setup. It clones a pinned source
+revision into a temporary directory and delegates the complete installation to the
+repository installer with one installer command. `PROJECT_SCOPE_REF` is an intentional
+integration token: the landing commit must replace it with the full reviewed commit
+SHA that contains project-scope support.
 
 Bash:
 
 ```bash
 set -Eeuo pipefail
 
-TARGET=$PWD
 REPO=https://github.com/PaoloDelCasale/copilot-minions.git
-REF=13e5813bcc4a3c6b80c83f45cc1451b80e1601f2
-PLATFORM=${MINIONS_PLATFORM:-pi} # pi | paseo
-TEMP_ROOT=${TMPDIR:-/tmp}
-TEMP_ROOT=${TEMP_ROOT%/}
-TEMP_DIR=$(mktemp -d "$TEMP_ROOT/copilot-minions.XXXXXXXX")
+REF=PROJECT_SCOPE_REF
+TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/copilot-minions.XXXXXXXX")
 SOURCE=$TEMP_DIR/source
+trap 'rm -rf -- "$TEMP_DIR"' EXIT
 
-cleanup() {
-  [[ -n ${TEMP_DIR:-} && -d $TEMP_DIR && $TEMP_DIR == "$TEMP_ROOT"/copilot-minions.* ]] &&
-    rm -rf -- "$TEMP_DIR"
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-
-case "$PLATFORM" in pi|paseo) ;; *) echo "MINIONS_PLATFORM must be pi or paseo" >&2; exit 2 ;; esac
-command -v pi >/dev/null || { echo "pi not found on PATH" >&2; exit 1; }
 git clone --filter=blob:none --no-checkout "$REPO" "$SOURCE"
 git -C "$SOURCE" fetch --depth 1 origin "$REF"
 git -C "$SOURCE" checkout --detach FETCH_HEAD
-[[ $(git -C "$SOURCE" rev-parse HEAD) == "$REF" ]] || { echo "Unexpected source revision" >&2; exit 1; }
+[[ $(git -C "$SOURCE" rev-parse HEAD) == "$REF" ]] || {
+  echo "Unexpected source revision" >&2
+  exit 1
+}
 
-SKILL=$TARGET/.pi/skills/pi-minions
-EXTENSION=$TARGET/.pi/extensions/pi-minions
-AGENTS=$TARGET/.pi/agents/copilot-minions
-for destination in "$SKILL" "$EXTENSION"; do
-  [[ ! -e $destination ]] || { echo "Refusing to overwrite $destination" >&2; exit 1; }
-done
-[[ $PLATFORM == paseo || ! -e $AGENTS ]] || { echo "Refusing to overwrite $AGENTS" >&2; exit 1; }
-
-PACKAGE=npm:pi-subagents@0.37.2
-[[ $PLATFORM == paseo ]] && PACKAGE=npm:pi-mcp-adapter@2.16.0
-pi install -l "$PACKAGE"
-
-mkdir -p "$SKILL" "$(dirname "$EXTENSION")"
-cp -R "$SOURCE/skills/core/." "$SKILL/"
-cp "$SOURCE/skills/pi-minions/SKILL.md" "$SOURCE/skills/pi-minions/platform.md" \
-  "$SOURCE/skills/pi-minions/models.md" "$SKILL/"
-cp -R "$SOURCE/scripts" "$SKILL/scripts"
-printf '%s\n' 'managed-by: copilot-minions' > "$SKILL/.managed-by-copilot-minions"
-cp -R "$SOURCE/extensions/pi-minions" "$EXTENSION"
-if [[ $PLATFORM == pi ]]; then
-  mkdir -p "$(dirname "$AGENTS")"
-  cp -R "$SOURCE/extensions/pi-minions/agents" "$AGENTS"
-fi
+bash "$SOURCE/install.sh" --platform paseo --scope project
 ```
 
 PowerShell 5+:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$target = (Get-Location).ProviderPath
 $repo = 'https://github.com/PaoloDelCasale/copilot-minions.git'
-$ref = '13e5813bcc4a3c6b80c83f45cc1451b80e1601f2'
-$platform = if ($env:MINIONS_PLATFORM) { $env:MINIONS_PLATFORM } else { 'pi' } # pi | paseo
-$tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$tempDir = Join-Path $tempRoot ("copilot-minions-{0}" -f [Guid]::NewGuid().ToString('N'))
+$ref = 'PROJECT_SCOPE_REF'
+$tempDir = Join-Path ([IO.Path]::GetTempPath()) ("copilot-minions-{0}" -f [Guid]::NewGuid().ToString('N'))
 $source = Join-Path $tempDir 'source'
 
 try {
-    if ($platform -notin @('pi', 'paseo')) { throw 'MINIONS_PLATFORM must be pi or paseo' }
-    if (-not (Get-Command pi -ErrorAction SilentlyContinue)) { throw 'pi not found on PATH' }
     New-Item -ItemType Directory -Path $tempDir | Out-Null
     & git clone --filter=blob:none --no-checkout $repo $source
     if ($LASTEXITCODE -ne 0) { throw 'git clone failed' }
@@ -198,37 +186,10 @@ try {
     $actualRef = (& git -C $source rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $actualRef -ne $ref) { throw 'Unexpected source revision' }
 
-    $skill = Join-Path $target '.pi\skills\pi-minions'
-    $extension = Join-Path $target '.pi\extensions\pi-minions'
-    $agents = Join-Path $target '.pi\agents\copilot-minions'
-    $destinations = @($skill, $extension)
-    if ($platform -eq 'pi') { $destinations += $agents }
-    foreach ($destination in $destinations) {
-        if (Test-Path -LiteralPath $destination) { throw "Refusing to overwrite $destination" }
-    }
-
-    $package = if ($platform -eq 'paseo') { 'npm:pi-mcp-adapter@2.16.0' } else { 'npm:pi-subagents@0.37.2' }
-    & pi install -l $package
-    if ($LASTEXITCODE -ne 0) { throw "pi install failed for $package" }
-
-    New-Item -ItemType Directory -Force -Path $skill, (Split-Path -Parent $extension) | Out-Null
-    Copy-Item -Recurse -Force (Join-Path $source 'skills\core\*') $skill
-    Copy-Item -Force (Join-Path $source 'skills\pi-minions\SKILL.md'), `
-        (Join-Path $source 'skills\pi-minions\platform.md'), `
-        (Join-Path $source 'skills\pi-minions\models.md') $skill
-    Copy-Item -Recurse -LiteralPath (Join-Path $source 'scripts') -Destination (Join-Path $skill 'scripts')
-    Set-Content -LiteralPath (Join-Path $skill '.managed-by-copilot-minions') -Value 'managed-by: copilot-minions'
-    Copy-Item -Recurse -LiteralPath (Join-Path $source 'extensions\pi-minions') -Destination $extension
-    if ($platform -eq 'pi') {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $agents) | Out-Null
-        Copy-Item -Recurse -LiteralPath (Join-Path $source 'extensions\pi-minions\agents') -Destination $agents
-    }
+    & (Join-Path $source 'install.ps1') -Platform paseo -Scope project
 } finally {
-    $resolvedTemp = [IO.Path]::GetFullPath($tempDir)
-    if ($resolvedTemp.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path -Leaf $resolvedTemp) -like 'copilot-minions-*' -and
-        (Test-Path -LiteralPath $resolvedTemp)) {
-        Remove-Item -Recurse -Force -LiteralPath $resolvedTemp
+    if (Test-Path -LiteralPath $tempDir) {
+        Remove-Item -Recurse -Force -LiteralPath $tempDir
     }
 }
 ```

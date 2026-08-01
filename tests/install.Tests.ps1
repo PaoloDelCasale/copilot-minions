@@ -93,7 +93,13 @@ exit /b 0
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $expectedCache) | Out-Null
     Move-Item -LiteralPath $cache -Destination $expectedCache
 
-    & (Join-Path $root 'install.ps1') -Platform all | Out-Null
+    $globalOutput = (& (Join-Path $root 'install.ps1') -Platform all 6>&1 | Out-String)
+    Assert-True ($globalOutput.Contains('Installed platform: all; variant: standard')) 'Global output keeps the historical header'
+    Assert-True (-not $globalOutput.Contains('scope: global')) 'Global output does not add a scope suffix'
+    $globalPiInstallLog = Get-Content -LiteralPath $env:MINIONS_TEST_PI_INSTALL_LOG -Raw
+    Assert-True ($globalPiInstallLog.Contains('install npm:pi-subagents@0.37.2')) 'Global Pi package install keeps its historical command'
+    Assert-True ($globalPiInstallLog.Contains('install npm:pi-mcp-adapter@2.16.0')) 'Global Paseo package install keeps its historical command'
+    Assert-True (-not $globalPiInstallLog.Contains('install -l ')) 'Global package installs remain non-local'
 
     $copilotSkill = Join-Path $testHome '.copilot\skills\copilot-minions'
     $codexSkill = Join-Path $testHome '.agents\skills\codex-minions'
@@ -186,6 +192,7 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $projectPaseoExtension 'index.ts')) 'Project Paseo extension is installed under .pi/extensions'
     Assert-True (Test-Path (Join-Path $projectPaseoExtension '.managed-by-copilot-minions')) 'Project Paseo extension has its ownership marker'
     Assert-True (Test-Path (Join-Path $projectPaseoExtension 'agents\pi-minions-reviewer.md')) 'Paseo role prompts stay beside the project extension'
+    Assert-True (-not (Test-Path (Join-Path $projectPaseoPi 'agent'))) 'Project Paseo never creates the global-style .pi/agent tree'
     Assert-True (-not (Test-Path (Join-Path $projectPaseoPi 'agents'))) 'Project Paseo does not create .pi/agents'
     foreach ($skillPath in @($projectPaseoSkill, $projectPaseoLbSkill)) {
         Assert-True (Test-Path (Join-Path $skillPath 'SKILL.md')) "Project skill is installed: $skillPath"
@@ -228,6 +235,7 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $projectPiAgents '.managed-by-copilot-minions')) 'Project Pi companion agents have an ownership marker'
     Assert-True (Test-Path (Join-Path $projectPiAgents 'pi-minions-review-axis.md')) 'Project Pi companion agents are installed recursively under .pi/agents'
     Assert-True (@(Get-ChildItem -LiteralPath $projectPiAgents -Filter 'pi-minions-*.md').Count -eq 7) 'Project Pi installs all companion agents'
+    Assert-True (-not (Test-Path (Join-Path $projectPiRoot 'agent'))) 'Project Pi never creates the global-style .pi/agent tree'
     Assert-True (Test-Path (Join-Path $projectPiSkill 'control.md')) 'Project Pi skill is self-contained'
     Assert-True (-not (Test-Path (Join-Path $projectPiRoot 'skills\implement'))) 'Project Pi also skips the global discipline updater'
     Assert-True (Test-Path $globalProjectSentinel) 'Project Pi leaves global Pi resources untouched'
@@ -505,6 +513,12 @@ exit /b 0
         $failed = $true
     }
     Assert-True $failed 'Near-match model IDs are rejected'
+
+    $readme = Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw
+    Assert-True ($readme.Contains('PROJECT_SCOPE_REF')) 'README exposes the integration pin token'
+    Assert-True ($readme.Contains('bash "$SOURCE/install.sh" --platform paseo --scope project')) 'Bash Worktree Setup invokes the installer'
+    Assert-True ($readme.Contains("& (Join-Path `$source 'install.ps1') -Platform paseo -Scope project")) 'PowerShell Worktree Setup invokes the installer'
+    Assert-True (-not $readme.Contains('13e5813')) 'README no longer pins the pre-feature commit'
 
     Write-Host 'PowerShell installer smoke tests passed.'
 } finally {
