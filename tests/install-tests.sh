@@ -457,7 +457,9 @@ if bash "${ROOT}/install.sh" --platform codex --variant lb >/dev/null 2>&1; then
   exit 1
 fi
 
-grep -Fq 'PROJECT_SCOPE_REF' "${ROOT}/README.md"
+grep -Fq 'REF=f8cc992e3053a84122412cde9e7baa899379cf6e' "${ROOT}/README.md"
+grep -Fq "\$ref = 'f8cc992e3053a84122412cde9e7baa899379cf6e'" "${ROOT}/README.md"
+! grep -Fq 'PROJECT_SCOPE_REF' "${ROOT}/README.md"
 grep -Fq 'bash "$SOURCE/install.sh" --platform paseo --scope project' "${ROOT}/README.md"
 grep -Fq "& (Join-Path \$source 'install.ps1') -Platform paseo -Scope project" "${ROOT}/README.md"
 ! grep -Fq 'REF=13e5813' "${ROOT}/README.md"

@@ -515,7 +515,9 @@ exit /b 0
     Assert-True $failed 'Near-match model IDs are rejected'
 
     $readme = Get-Content -LiteralPath (Join-Path $root 'README.md') -Raw
-    Assert-True ($readme.Contains('PROJECT_SCOPE_REF')) 'README exposes the integration pin token'
+    Assert-True ($readme.Contains('REF=f8cc992e3053a84122412cde9e7baa899379cf6e')) 'README pins the reviewed Bash installer commit'
+    Assert-True ($readme.Contains("`$ref = 'f8cc992e3053a84122412cde9e7baa899379cf6e'")) 'README pins the reviewed PowerShell installer commit'
+    Assert-True (-not $readme.Contains('PROJECT_SCOPE_REF')) 'README contains no unresolved integration pin token'
     Assert-True ($readme.Contains('bash "$SOURCE/install.sh" --platform paseo --scope project')) 'Bash Worktree Setup invokes the installer'
     Assert-True ($readme.Contains("& (Join-Path `$source 'install.ps1') -Platform paseo -Scope project")) 'PowerShell Worktree Setup invokes the installer'
     Assert-True (-not $readme.Contains('13e5813')) 'README no longer pins the pre-feature commit'

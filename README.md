@@ -96,8 +96,8 @@ Project-local destinations:
 | Paseo + Pi | `.pi/skills/pi-minions[-lb]`, `.pi/extensions/pi-minions` (including adjacent `agents/` prompts), `.pi/settings.json`, `.pi/npm/`; no `.pi/agents/copilot-minions` copy |
 
 The project installer runs `pi install -l` from the resolved target, never creates
-`.pi/agent`, skips the global discipline updater, and refuses unmanaged destination
-collisions. Managed resources are staged and replaced transactionally, so reruns are
+`.pi/agent` or modifies `~/.pi/agent`, skips the global discipline updater, and
+refuses unmanaged destination collisions. Managed resources are staged and replaced transactionally, so reruns are
 idempotent and a failed commit rolls existing resources back. A per-target lock
 prevents overlapping installers.
 
@@ -140,9 +140,8 @@ shown below):
 
 Paste the matching snippet into Paseo's Worktree Setup. It clones a pinned source
 revision into a temporary directory and delegates the complete installation to the
-repository installer with one installer command. `PROJECT_SCOPE_REF` is an intentional
-integration token: the landing commit must replace it with the full reviewed commit
-SHA that contains project-scope support.
+repository installer with one installer command. The full commit SHA is fixed to the
+reviewed implementation; update it deliberately when adopting a newer release.
 
 Bash:
 
@@ -150,7 +149,7 @@ Bash:
 set -Eeuo pipefail
 
 REPO=https://github.com/PaoloDelCasale/copilot-minions.git
-REF=PROJECT_SCOPE_REF
+REF=f8cc992e3053a84122412cde9e7baa899379cf6e
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/copilot-minions.XXXXXXXX")
 SOURCE=$TEMP_DIR/source
 trap 'rm -rf -- "$TEMP_DIR"' EXIT
@@ -171,7 +170,7 @@ PowerShell 5+:
 ```powershell
 $ErrorActionPreference = 'Stop'
 $repo = 'https://github.com/PaoloDelCasale/copilot-minions.git'
-$ref = 'PROJECT_SCOPE_REF'
+$ref = 'f8cc992e3053a84122412cde9e7baa899379cf6e'
 $tempDir = Join-Path ([IO.Path]::GetTempPath()) ("copilot-minions-{0}" -f [Guid]::NewGuid().ToString('N'))
 $source = Join-Path $tempDir 'source'
 
