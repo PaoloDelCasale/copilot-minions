@@ -494,4 +494,9 @@ if ($Scope -eq 'global' -and (Test-Path -LiteralPath $updater)) {
     Write-Host ''
 }
 
-Write-Host "Opt in with 'orchestrate', 'minions on', or 'go build it'."
+if ((Test-Platform 'pi') -or (Test-Platform 'paseo')) {
+    Write-Host "Pi/Paseo is slash-command-only: use '/minions' or '/minions-lb'."
+}
+if ((Test-Platform 'copilot') -or (Test-Platform 'codex')) {
+    Write-Host "Copilot/Codex: opt in with 'orchestrate', 'minions on', or 'go build it'."
+}
