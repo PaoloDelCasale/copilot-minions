@@ -800,7 +800,7 @@ test("Pi aliases and explicit natural-language requests route through Minions", 
   });
   const naturalItalian = harness.handlers.get("input")({
     source: "rpc",
-    text: "Lavora alla issue con Minions e verifica i test",
+    text: "Lavora alla issue con la skill minion e verifica i test",
   });
   const naturalEnglish = harness.handlers.get("input")({
     source: "rpc",
@@ -826,7 +826,7 @@ test("Pi aliases and explicit natural-language requests route through Minions", 
 
   assert.equal(transformed.text, "/skill:pi-minions build this");
   assert.equal(paseoAlias.text, "/skill:pi-minions-lb build this cheaply");
-  assert.equal(naturalItalian.text, "/skill:pi-minions Lavora alla issue con Minions e verifica i test");
+  assert.equal(naturalItalian.text, "/skill:pi-minions Lavora alla issue con la skill minion e verifica i test");
   assert.equal(naturalEnglish.text, "/skill:pi-minions-lb Using minions, implement this in low-budget mode");
   assert.equal(blockedWorkspace.block, true);
   assert.match(blockedWorkspace.reason, /current Paseo Workspace/);

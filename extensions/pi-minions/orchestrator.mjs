@@ -29,7 +29,7 @@ const ROLE_AGENTS = {
   planner: "pi-minions-planner",
 };
 const MINIONS_OPT_OUT = /(?:^|\s)(?:\/direct\b|skip\s+(?:minions|workers)\b|senza\s+minions?\b|non\s+usare\s+minions?\b)/i;
-const MINIONS_NATURAL_TRIGGER = /(?:\b(?:con|with|using)\s+(?:i\s+)?minions?\b|\b(?:usa|usando|use|avvia|attiva)\s+(?:i\s+)?minions?\b|\bminions?\s+on\b|^\s*orchestrate\b)/i;
+const MINIONS_NATURAL_TRIGGER = /(?:\b(?:con|with|using)\s+(?:(?:la|the)\s+skill\s+|i\s+)?minions?\b|\b(?:usa|usando|use|avvia|attiva)\s+(?:(?:la|the)\s+skill\s+|i\s+)?minions?\b|\bminions?\s+on\b|^\s*orchestrate\b)/i;
 
 function naturalMinionsSkill(text) {
   if (typeof text !== "string" || text.startsWith("/") || MINIONS_OPT_OUT.test(text)) return undefined;

@@ -217,8 +217,8 @@ Standard triggers: `orchestrate`, `go build it`, `minions on`, explicit requests
 as `con Minions` / `using Minions`, and planning-to-build flows. Platform names are
 explicit: `copilot-minions`, `codex-minions`, and `pi-minions`; Paseo-hosted Pi also
 accepts the `paseo-minions` alias. The project-local Pi extension exposes `/minions`
-and automatically routes those explicit natural-language requests through
-`/skill:pi-minions`, including the first Paseo agent prompt after Worktree Setup.
+and, once the project extension is loaded, automatically routes those explicit
+natural-language requests through `/skill:pi-minions`.
 Low-budget variants use `/minions-lb`, `orchestrate low budget`, `minions lb`, or
 their explicit names.
 
