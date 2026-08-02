@@ -224,7 +224,7 @@ Opt out with `/direct`, `skip minions`, or `skip workers`.
 Each orchestration run declares one bounded Goal, completion criteria, out-of-scope
 work, fixed point, verification contract, and worker/triage budgets. After eight
 worker results the frontier enters closure mode and permits only already-boarded fix,
-review, gate, commit, or landing work. At twenty results it stops dispatching, drains
+review, gate, commit, or landing work. At thirty results it stops dispatching, drains
 in-flight work, posts a full handoff, and closes the run. Adjacent issue slices require
 a new explicit Goal.
 
@@ -279,8 +279,8 @@ budgets remain exact. Minions persists both IDs across reloads. Deliberately sto
 workers remain non-resumable. Paseo-managed workers currently reject
 `timeoutSeconds` because Paseo 0.2.5 does not expose a persistent child deadline.
 
-The wrapper enforces six concurrent workers and twenty launches. Eight triaged
-results trigger a soft gate that accepts only `budgetClass: "closure"` work; twenty
+The wrapper enforces six concurrent workers and thirty launches. Eight triaged
+results trigger a soft gate that accepts only `budgetClass: "closure"` work; thirty
 results trigger the hard handoff. Implementer and architect launches require an
 explicit linked Git worktree; the runtime rejects a primary checkout before
 spawning. Worker usage is credited exactly once through `minions_read`, with
