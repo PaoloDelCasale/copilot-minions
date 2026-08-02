@@ -277,6 +277,10 @@ async function execute(tool, params, ctx) {
 }
 
 async function start(harness, variant = "standard") {
+  harness.handlers.get("input")({
+    source: "interactive",
+    text: `/skill:pi-minions${variant === "lb" ? "-lb" : ""}`,
+  });
   return execute(harness.tools.get("minions_start"), { variant }, harness.ctx);
 }
 
@@ -788,16 +792,8 @@ test("frontier model and thinking remain locked during an active run", async () 
   assert.equal(harness.thinkingChanges.at(-1), "medium");
 });
 
-test("Pi aliases and explicit natural-language requests route through Minions", async () => {
+test("Pi Minions is authorized only by slash commands", async () => {
   const harness = createHarness();
-  const transformed = harness.handlers.get("input")({
-    source: "user",
-    text: "/skill:codex-minions build this",
-  });
-  const paseoAlias = harness.handlers.get("input")({
-    source: "user",
-    text: "/skill:paseo-minions-lb build this cheaply",
-  });
   const naturalItalian = harness.handlers.get("input")({
     source: "rpc",
     text: "Lavora alla issue con Minions e verifica i test",
@@ -806,9 +802,26 @@ test("Pi aliases and explicit natural-language requests route through Minions", 
     source: "rpc",
     text: "Using minions, implement this in low-budget mode",
   });
+  const allowedWorkspaceBeforeSlash = harness.handlers.get("tool_call")({
+    toolName: "mcp",
+    input: { tool: "paseo_create_workspace", args: {} },
+  });
+  await assert.rejects(
+    execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx),
+    /slash-command-only.*explicitly invoke \/minions/i,
+  );
+
+  const transformed = harness.handlers.get("input")({
+    source: "interactive",
+    text: "/skill:codex-minions build this",
+  });
   const blockedWorkspace = harness.handlers.get("tool_call")({
     toolName: "mcp",
     input: { tool: "paseo_create_workspace", args: {} },
+  });
+  const paseoAlias = harness.handlers.get("input")({
+    source: "interactive",
+    text: "/skill:paseo-minions-lb build this cheaply",
   });
   const allowedMcp = harness.handlers.get("tool_call")({
     toolName: "mcp",
@@ -824,15 +837,18 @@ test("Pi aliases and explicit natural-language requests route through Minions", 
   });
   const prompt = harness.handlers.get("before_agent_start")({ systemPrompt: "base" }, harness.ctx);
 
+  assert.deepEqual(naturalItalian, { action: "continue" });
+  assert.deepEqual(naturalEnglish, { action: "continue" });
+  assert.equal(allowedWorkspaceBeforeSlash, undefined);
   assert.equal(transformed.text, "/skill:pi-minions build this");
-  assert.equal(paseoAlias.text, "/skill:pi-minions-lb build this cheaply");
-  assert.equal(naturalItalian.text, "/skill:pi-minions Lavora alla issue con Minions e verifica i test");
-  assert.equal(naturalEnglish.text, "/skill:pi-minions-lb Using minions, implement this in low-budget mode");
   assert.equal(blockedWorkspace.block, true);
   assert.match(blockedWorkspace.reason, /current Paseo Workspace/);
+  assert.equal(paseoAlias.text, "/skill:pi-minions-lb build this cheaply");
   assert.equal(allowedMcp, undefined);
   assert.deepEqual(optedOut, { action: "continue" });
   assert.equal(allowedAfterOptOut, undefined);
+  assert.match(prompt.systemPrompt, /strictly slash-command-only/i);
+  assert.match(prompt.systemPrompt, /never infer, select, or start Minions/i);
   assert.match(prompt.systemPrompt, /never call MCP create_workspace/i);
   assert.match(prompt.systemPrompt, /existing Paseo workspace/i);
   assert.match(prompt.systemPrompt, /linked Git worktree/i);

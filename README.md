@@ -213,16 +213,13 @@ managed Pi/Codex resources and refuses to overwrite a user-owned collision.
 
 ## Usage
 
-Standard triggers: `orchestrate`, `go build it`, `minions on`, explicit requests such
-as `con Minions` / `using Minions`, and planning-to-build flows. Platform names are
-explicit: `copilot-minions`, `codex-minions`, and `pi-minions`; Paseo-hosted Pi also
-accepts the `paseo-minions` alias. The project-local Pi extension exposes `/minions`
-and automatically routes those explicit natural-language requests through
-`/skill:pi-minions`, including the first Paseo agent prompt after Worktree Setup.
-Low-budget variants use `/minions-lb`, `orchestrate low budget`, `minions lb`, or
-their explicit names.
-
-Opt out with `/direct`, `skip minions`, or `skip workers`.
+Copilot and Codex retain their documented natural-language triggers and explicit
+platform skill names. Pi is strictly slash-command-only: use `/minions` or
+`/skill:pi-minions` for the standard profile and `/minions-lb` or
+`/skill:pi-minions-lb` for the low-budget profile. Merely mentioning Minions,
+orchestration, parallel agents, or workers never authorizes the Pi extension to
+start a run. `minions_start` enforces this authorization in code rather than relying
+only on model instructions.
 
 Each orchestration run declares one bounded Goal, completion criteria, out-of-scope
 work, fixed point, verification contract, and worker/triage budgets. After eight
