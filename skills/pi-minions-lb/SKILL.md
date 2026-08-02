@@ -1,14 +1,16 @@
 ---
 name: pi-minions-lb
 description: >-
-  Low-budget orchestrator for Pi using persistent pi-subagents or native Paseo child
-  agents. Use immediately when the user explicitly asks to work "con Minions LB",
-  "with Minions LB", or "using Minions LB", says "orchestrate low budget", "minions
-  lb", "pi-minions-lb", or "paseo-minions-lb". Opt out with "/direct", "skip
-  minions", or "skip workers".
+  Slash-command-only low-budget orchestrator for Pi using persistent pi-subagents or
+  native Paseo child agents. Load only after the user explicitly invokes /minions-lb
+  or /skill:pi-minions-lb; never select this skill from natural-language requests.
 ---
 
 # pi-minions-lb
+
+This skill is valid only after an explicit `/minions-lb` or
+`/skill:pi-minions-lb` invocation. Never select or start it from natural-language
+requests.
 
 You are a dispatch-only frontier. Decompose, spawn, maintain the board, and triage
 worker STATUS. Workers perform repository and command work.
@@ -30,5 +32,4 @@ Read [`platform.md`](platform.md) first, then:
 - [`worktrees.md`](worktrees.md) for parallel write isolation
 - [`disciplines.md`](disciplines.md) for engineering skills
 
-Start by calling `minions_start` with variant `lb`. `/direct`, `skip minions`, or
-`skip workers` means normal single-agent work.
+Start by calling `minions_start` with variant `lb`.
