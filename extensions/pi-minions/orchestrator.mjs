@@ -28,6 +28,14 @@ const ROLE_AGENTS = {
   reviewer: "pi-minions-reviewer",
   planner: "pi-minions-planner",
 };
+const MINIONS_OPT_OUT = /(?:^|\s)(?:\/direct\b|skip\s+(?:minions|workers)\b|senza\s+minions?\b|non\s+usare\s+minions?\b)/i;
+const MINIONS_NATURAL_TRIGGER = /(?:\b(?:con|with|using)\s+(?:i\s+)?minions?\b|\b(?:usa|usando|use|avvia|attiva)\s+(?:i\s+)?minions?\b|\bminions?\s+on\b|^\s*orchestrate\b)/i;
+
+function naturalMinionsSkill(text) {
+  if (typeof text !== "string" || text.startsWith("/") || MINIONS_OPT_OUT.test(text)) return undefined;
+  if (!MINIONS_NATURAL_TRIGGER.test(text)) return undefined;
+  return /\b(?:minions?[- ]?lb|low[- ]budget)\b/i.test(text) ? "pi-minions-lb" : "pi-minions";
+}
 
 const PROVIDER_MATRICES = {
   "openai-codex": {
@@ -289,6 +297,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   let run;
   let runtimeInfo;
   let changingModel = false;
+  let minionsRoutingRequired = false;
   let lastContext;
   const earlyCompletions = new Map();
 
@@ -645,6 +654,24 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
   }
 
+  pi.registerCommand("minions", {
+    description: "Start project-local Minions orchestration in the current workspace",
+    handler: async (args) => {
+      minionsRoutingRequired = true;
+      const suffix = args.trim();
+      pi.sendUserMessage(`/skill:pi-minions${suffix ? ` ${suffix}` : ""}`);
+    },
+  });
+
+  pi.registerCommand("minions-lb", {
+    description: "Start low-budget project-local Minions orchestration in the current workspace",
+    handler: async (args) => {
+      minionsRoutingRequired = true;
+      const suffix = args.trim();
+      pi.sendUserMessage(`/skill:pi-minions-lb${suffix ? ` ${suffix}` : ""}`);
+    },
+  });
+
   pi.registerTool({
     name: "minions_start",
     label: "Start Minions",
@@ -653,6 +680,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       lastContext = ctx;
       const variant = params.variant ?? "standard";
+      minionsRoutingRequired = true;
       if (!SUPPORTED_VARIANTS.has(variant)) throw new Error(`Unknown minions variant: ${variant}`);
       if (!ctx.isProjectTrusted()) throw new Error("Pi minions requires a trusted project.");
       const provider = ctx.model?.provider;
@@ -938,6 +966,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const pendingUsage = combineUsage(...[...closing.workers.values()].map((worker) => worker.pendingUsage));
       persistRun("closed");
       run = undefined;
+      minionsRoutingRequired = false;
       ctx.ui?.setStatus?.("pi-minions", undefined);
       const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${closing.runtime === "paseo" ? "Paseo agents" : "pi-subagents artifacts and resumable sessions"} remain available.`, {
         runId: closing.id,
@@ -949,19 +978,47 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
 
   pi.on("input", (event) => {
     if (event.source === "extension") return { action: "continue" };
+    if (MINIONS_OPT_OUT.test(event.text)) {
+      minionsRoutingRequired = false;
+      return { action: "continue" };
+    }
+    if (event.text.startsWith("/skill:pi-minions")) {
+      minionsRoutingRequired = true;
+      return { action: "continue" };
+    }
     if (event.text.startsWith("/skill:paseo-minions-lb")) {
+      minionsRoutingRequired = true;
       return { action: "transform", text: event.text.replace("/skill:paseo-minions-lb", "/skill:pi-minions-lb") };
     }
     if (event.text.startsWith("/skill:paseo-minions")) {
+      minionsRoutingRequired = true;
       return { action: "transform", text: event.text.replace("/skill:paseo-minions", "/skill:pi-minions") };
     }
     if (event.text.startsWith("/skill:codex-minions-lb")) {
+      minionsRoutingRequired = true;
       return { action: "transform", text: event.text.replace("/skill:codex-minions-lb", "/skill:pi-minions-lb") };
     }
     if (event.text.startsWith("/skill:codex-minions")) {
+      minionsRoutingRequired = true;
       return { action: "transform", text: event.text.replace("/skill:codex-minions", "/skill:pi-minions") };
     }
+    const naturalSkill = naturalMinionsSkill(event.text);
+    if (naturalSkill) {
+      minionsRoutingRequired = true;
+      return { action: "transform", text: `/skill:${naturalSkill} ${event.text}` };
+    }
     return { action: "continue" };
+  });
+
+  pi.on("tool_call", (event) => {
+    if (!run && !minionsRoutingRequired) return;
+    if (event.toolName !== "mcp") return;
+    const paseoTool = event.input?.tool ?? event.input?.describe;
+    if (!["paseo_create_workspace", "paseo_create_agent", "paseo_send_agent_prompt"].includes(paseoTool)) return;
+    return {
+      block: true,
+      reason: `${paseoTool} bypasses Minions. Use minions_spawn so native child agents remain in the current Paseo Workspace.`,
+    };
   });
 
   pi.on("before_agent_start", (event, ctx) => {
@@ -969,7 +1026,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       systemPrompt: `${event.systemPrompt}
 
-Pi harness routing: use pi-minions or pi-minions-lb for top-level orchestration. Minions owns provider affinity, role routing, budgets, and board identity. In Paseo agent sessions it delegates to Paseo-managed child agents; otherwise it delegates to pi-subagents. Never call the generic subagent tool directly or use MCP create_agent for top-level dispatch; do not bypass Minions. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
+Pi harness routing is mandatory for top-level orchestration. An explicit user request to use Minions must be routed through the project-local pi-minions or pi-minions-lb skill before any repository inspection, shell command, or delegation; call minions_start first and use only minions_* tools for the run. Minions owns provider affinity, role routing, budgets, board identity, and worker lifecycle. In Paseo, never call MCP create_workspace and never create another Paseo Workspace for Minions. Do not call generic MCP create_agent, send_agent_prompt, or the generic subagent tool for top-level dispatch. minions_spawn creates native child agents in the caller's existing Paseo workspace. Write isolation uses linked Git worktree directories passed as worker cwd; a Git worktree is not a Paseo Workspace. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
     };
   });
 

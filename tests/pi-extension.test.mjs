@@ -189,7 +189,9 @@ function createHarness({
   loadedDisciplines = [],
 } = {}) {
   const tools = new Map();
+  const commands = new Map();
   const handlers = new Map();
+  const sentUserMessages = [];
   const modelChanges = [];
   const thinkingChanges = [];
   const notifications = [];
@@ -200,6 +202,8 @@ function createHarness({
   const pi = {
     events,
     registerTool(tool) { tools.set(tool.name, tool); },
+    registerCommand(name, command) { commands.set(name, command); },
+    sendUserMessage(message) { sentUserMessages.push(message); },
     on(name, handler) { handlers.set(name, handler); },
     async setModel(model) {
       modelChanges.push(model);
@@ -245,6 +249,7 @@ function createHarness({
   };
   createPiMinionsExtension(pi, {
     schemas,
+    paseoHosted: false,
     validateWriterCwd: () => true,
     resolveDiscipline: (name) => loadedDisciplines.includes(name),
     ...dependencies,
@@ -253,7 +258,9 @@ function createHarness({
     pi,
     runtime,
     tools,
+    commands,
     handlers,
+    sentUserMessages,
     ctx,
     modelChanges,
     thinkingChanges,
@@ -781,7 +788,7 @@ test("frontier model and thinking remain locked during an active run", async () 
   assert.equal(harness.thinkingChanges.at(-1), "medium");
 });
 
-test("Pi aliases and the system prompt keep top-level dispatch on Minions", () => {
+test("Pi aliases and explicit natural-language requests route through Minions", async () => {
   const harness = createHarness();
   const transformed = harness.handlers.get("input")({
     source: "user",
@@ -791,11 +798,53 @@ test("Pi aliases and the system prompt keep top-level dispatch on Minions", () =
     source: "user",
     text: "/skill:paseo-minions-lb build this cheaply",
   });
+  const naturalItalian = harness.handlers.get("input")({
+    source: "rpc",
+    text: "Lavora alla issue con Minions e verifica i test",
+  });
+  const naturalEnglish = harness.handlers.get("input")({
+    source: "rpc",
+    text: "Using minions, implement this in low-budget mode",
+  });
+  const blockedWorkspace = harness.handlers.get("tool_call")({
+    toolName: "mcp",
+    input: { tool: "paseo_create_workspace", args: {} },
+  });
+  const allowedMcp = harness.handlers.get("tool_call")({
+    toolName: "mcp",
+    input: { tool: "paseo_get_agent_activity", args: {} },
+  });
+  const optedOut = harness.handlers.get("input")({
+    source: "rpc",
+    text: "Lavora senza minions su questa issue",
+  });
+  const allowedAfterOptOut = harness.handlers.get("tool_call")({
+    toolName: "mcp",
+    input: { tool: "paseo_create_workspace", args: {} },
+  });
   const prompt = harness.handlers.get("before_agent_start")({ systemPrompt: "base" }, harness.ctx);
+
   assert.equal(transformed.text, "/skill:pi-minions build this");
   assert.equal(paseoAlias.text, "/skill:pi-minions-lb build this cheaply");
-  assert.match(prompt.systemPrompt, /never call the generic subagent tool directly/i);
+  assert.equal(naturalItalian.text, "/skill:pi-minions Lavora alla issue con Minions e verifica i test");
+  assert.equal(naturalEnglish.text, "/skill:pi-minions-lb Using minions, implement this in low-budget mode");
+  assert.equal(blockedWorkspace.block, true);
+  assert.match(blockedWorkspace.reason, /current Paseo Workspace/);
+  assert.equal(allowedMcp, undefined);
+  assert.deepEqual(optedOut, { action: "continue" });
+  assert.equal(allowedAfterOptOut, undefined);
+  assert.match(prompt.systemPrompt, /never call MCP create_workspace/i);
+  assert.match(prompt.systemPrompt, /existing Paseo workspace/i);
+  assert.match(prompt.systemPrompt, /linked Git worktree/i);
   assert.match(prompt.systemPrompt, /subagent_supervisor/);
+
+  assert.deepEqual([...harness.commands.keys()], ["minions", "minions-lb"]);
+  await harness.commands.get("minions").handler("build this");
+  await harness.commands.get("minions-lb").handler("");
+  assert.deepEqual(harness.sentUserMessages, [
+    "/skill:pi-minions build this",
+    "/skill:pi-minions-lb",
+  ]);
 });
 
 test("review workers load Matt's code-review discipline and use the nested-capable adapter", async () => {

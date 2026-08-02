@@ -1,6 +1,10 @@
 # Worktrees
 
-Create one worktree per write task. Parallel writers never share a checkout.
+Create one linked **Git worktree directory** per write task. Parallel writers never
+share a checkout. Under Paseo this never means creating another Paseo Workspace:
+all workers are native child agents in the caller's existing Workspace, and the
+absolute Git worktree path is passed to `minions_spawn` as `cwd`. Never call Paseo
+`create_workspace` for Minions isolation.
 
 Spawn only unblocked tasks. An independent task branches from the remote default
 branch. A dependent task branches from the completed blocker's local branch.
