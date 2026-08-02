@@ -433,4 +433,9 @@ elif [[ -f "${UPDATER}" ]]; then
   echo
 fi
 
-echo "Opt in with 'orchestrate', 'minions on', or 'go build it'."
+if selected_platform pi || selected_platform paseo; then
+  echo "Pi/Paseo is slash-command-only: use '/minions' or '/minions-lb'."
+fi
+if selected_platform copilot || selected_platform codex; then
+  echo "Copilot/Codex: opt in with 'orchestrate', 'minions on', or 'go build it'."
+fi
