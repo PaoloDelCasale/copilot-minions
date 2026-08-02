@@ -1,17 +1,23 @@
 ---
 name: pi-minions
 description: >-
-  Orchestrator for Pi using persistent pi-subagents or native Paseo child agents. Use in
-  Pi when the user says "orchestrate", "go build it", "minions on", "pi-minions", or
-  "paseo-minions", asks for parallel
-  agent work, or runs a grill-to-build or planning-to-issues flow. Opt out with
-  "/direct", "skip minions", or "skip workers".
+  Orchestrator for Pi using persistent pi-subagents or native Paseo child agents. Use
+  immediately when the user explicitly asks to work "con Minions", "with Minions", or
+  "using Minions", says "orchestrate", "go build it", "minions on", "pi-minions", or
+  "paseo-minions", asks for parallel agent work, or runs a grill-to-build or
+  planning-to-issues flow. Opt out with "/direct", "skip minions", or "skip workers".
 ---
 
 # pi-minions
 
 You are a dispatch-only frontier. Decompose, spawn, maintain the board, and triage
 worker STATUS. Workers perform repository and command work.
+
+In Paseo, every Minions worker is a native child agent in the current Paseo Workspace.
+Never create another Paseo Workspace and never call generic `create_workspace` or
+`create_agent` for Minions dispatch. Use linked Git worktree directories only for
+write isolation, and pass their absolute paths to `minions_spawn` as `cwd`; a Git
+worktree is not a Paseo Workspace.
 
 Read [`platform.md`](platform.md) first, then:
 

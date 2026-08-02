@@ -213,11 +213,14 @@ managed Pi/Codex resources and refuses to overwrite a user-owned collision.
 
 ## Usage
 
-Standard triggers: `orchestrate`, `go build it`, `minions on`, and planning-to-build
-flows. Platform names are explicit: `copilot-minions`, `codex-minions`, and
-`pi-minions`; Paseo-hosted Pi also accepts the `paseo-minions` alias.
-Low-budget variants trigger on `orchestrate low budget`, `minions lb`, or their
-explicit names.
+Standard triggers: `orchestrate`, `go build it`, `minions on`, explicit requests such
+as `con Minions` / `using Minions`, and planning-to-build flows. Platform names are
+explicit: `copilot-minions`, `codex-minions`, and `pi-minions`; Paseo-hosted Pi also
+accepts the `paseo-minions` alias. The project-local Pi extension exposes `/minions`
+and automatically routes those explicit natural-language requests through
+`/skill:pi-minions`, including the first Paseo agent prompt after Worktree Setup.
+Low-budget variants use `/minions-lb`, `orchestrate low budget`, `minions lb`, or
+their explicit names.
 
 Opt out with `/direct`, `skip minions`, or `skip workers`.
 
@@ -271,9 +274,11 @@ Outside Paseo, workers use namespaced `pi-subagents` agents and explicit
 provider-qualified model routes. `pi-subagents` owns process lifecycle, FleetView,
 artifacts, session recovery, supervisor communication, steering, timeout enforcement,
 and completion notifications. In a Paseo agent-scoped session, Minions discovers the
-injected `/mcp/agents` endpoint, creates `pi/<provider>/<model>` native child agents,
-and projects Paseo status, recent activity, token/cost usage, cancellation, and
-follow-up runs onto the same `minions_*` interface. Paseo keeps one native agent ID
+injected `/mcp/agents` endpoint and creates `pi/<provider>/<model>` native child
+agents in the caller's existing Paseo Workspace. It never creates a new Paseo
+Workspace: linked Git worktrees provide write isolation and are passed only as worker
+`cwd` values. Minions projects Paseo status, recent activity, token/cost usage,
+cancellation, and follow-up runs onto the same `minions_*` interface. Paseo keeps one native agent ID
 while Minions assigns a new execution ID to each resumed run so launch and triage
 budgets remain exact. Minions persists both IDs across reloads. Deliberately stopped
 workers remain non-resumable. Paseo-managed workers currently reject

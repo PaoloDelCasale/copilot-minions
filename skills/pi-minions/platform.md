@@ -9,6 +9,8 @@ work artifacts, supervisor communication, timeouts, and completion notifications
 When Pi is hosted by Paseo, the extension instead uses Paseo's injected agent-scoped
 MCP: workers become native Paseo child agents visible in its subagent track, and
 Paseo owns their persistence, activity, usage, stop, follow-up, and notifications.
+Every child remains in the caller's existing Paseo Workspace. Never create a Paseo
+Workspace for a Minions worker.
 
 Never pass a provider. Pass `modelOverride` only when the user explicitly requested a
 model. Use the documented `routeOverride` values for mechanical judgment and the
@@ -28,6 +30,8 @@ adapter rejects the primary checkout. A failed or paused package run may be revi
 with `minions_resume` while keeping the same Minions worker ID. A worker deliberately
 stopped with `minions_stop` is not resumable. Paseo and generic `pi-subagents`
 completion notifications are signals to call `minions_read`; do not bypass the
-adapter with the generic `subagent` or Paseo `create_agent` tool for top-level
-dispatch. Paseo does not yet expose a persistent deadline through this adapter, so
-omit `timeoutSeconds` for Paseo-managed workers.
+adapter with generic `subagent`, MCP `create_agent`, `send_agent_prompt`, or
+`create_workspace` tools for top-level dispatch. In particular, a linked Git worktree
+passed as `cwd` is write isolation inside the existing Paseo Workspace, not a request
+to create another Workspace. Paseo does not yet expose a persistent deadline through
+this adapter, so omit `timeoutSeconds` for Paseo-managed workers.
