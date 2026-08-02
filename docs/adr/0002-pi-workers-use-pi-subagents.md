@@ -26,8 +26,8 @@ process ownership with RPC calls to the pinned `npm:pi-subagents@0.37.2` runtime
 Minions continues to own:
 
 - provider affinity and exact role/model/thinking matrices;
-- worker IDs, board mapping, six-worker concurrency, twenty launches, and the
-  soft-eight/hard-twenty triage budget with closure-only continuation;
+- worker IDs, board mapping, six-worker concurrency, thirty launches, and the
+  soft-eight/hard-thirty triage budget with closure-only continuation;
 - explicit discipline selection with inline fallback;
 - linked-worktree validation for implementation writers;
 - parent frontier model locking and restoration.
