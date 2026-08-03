@@ -123,6 +123,8 @@ test("the Paseo runtime creates native child agents and normalizes their lifecyc
   assert.deepEqual(create.args.relationship, { kind: "subagent" });
   assert.deepEqual(create.args.workspace, { kind: "current", cwd: "C:/repo" });
   assert.match(create.args.initialPrompt, /Do not create or delegate/);
+  assert.match(create.args.initialPrompt, /Never call Paseo agent lifecycle or control tools/);
+  assert.match(create.args.initialPrompt, /Never list, inspect, prompt, steer, stop, cancel, or resume top-level Minions workers/);
   assert.match(create.args.initialPrompt, /Inspect auth/);
 
   pendingPermissions = [{ id: "permission-1" }];
@@ -143,6 +145,13 @@ test("the Paseo runtime creates native child agents and normalizes their lifecyc
   assert.equal(result.details.completion.totalTokens.total, 32);
   assert.equal(result.details.completion.totalTokens.cacheRead, 5);
   assert.equal(result.details.completion.totalCost.costUsd, 0.04);
+  const activityCalls = calls.filter((call) => call.name === "get_agent_activity").length;
+  await runtime.call("status", {
+    id: "agent-child",
+    runId: spawned.details.asyncId,
+    includeActivity: false,
+  });
+  assert.equal(calls.filter((call) => call.name === "get_agent_activity").length, activityCalls);
 
   const resumed = await runtime.call("resume", { id: "agent-child", message: "Continue" });
   assert.equal(resumed.details.runtimeAgentId, "agent-child");

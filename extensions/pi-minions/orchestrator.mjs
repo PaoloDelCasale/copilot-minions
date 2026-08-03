@@ -19,6 +19,15 @@ const MAX_WORKER_LAUNCHES = 30;
 const BUDGET_CLASSES = new Set(["normal", "closure"]);
 const CLOSURE_ROLES = new Set(["mechanical", "implementer", "architect", "reviewer"]);
 const WRITER_ROLES = new Set(["implementer", "architect"]);
+const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
+const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
+const DEFAULT_RUN_COST_CEILING_USD = 40;
+const MODEL_BUDGETS = {
+  "gpt-5.6-luna": { warningCostUsd: 4, maxCostUsd: 6, maxDurationSeconds: 30 * 60 },
+  "gpt-5.6-sol": { warningCostUsd: 10, maxCostUsd: 15, maxDurationSeconds: 45 * 60 },
+  "gpt-5.6-terra": { warningCostUsd: 6, maxCostUsd: 10, maxDurationSeconds: 35 * 60 },
+  "grok-4.5": { warningCostUsd: 6, maxCostUsd: 10, maxDurationSeconds: 35 * 60 },
+};
 const REQUIRED_RPC_METHODS = ["ping", "status", "spawn", "steer", "stop", "resume"];
 const ROLE_AGENTS = {
   mechanical: "pi-minions-mechanical",
@@ -280,7 +289,37 @@ function requestedDiscipline(task) {
 }
 
 function activeStatus(status) {
-  return status === "in-flight" || status === "stopping";
+  return status === "in-flight" || status === "settling" || status === "stopping";
+}
+
+function liveUsageFromSnapshot(snapshot) {
+  const usage = snapshot?.lastUsage;
+  if (!usage) return undefined;
+  const input = Number(usage.inputTokens) || 0;
+  const cacheRead = Number(usage.cachedInputTokens) || 0;
+  const output = Number(usage.outputTokens) || 0;
+  const costUsd = Number(usage.totalCostUsd) || 0;
+  if (!input && !cacheRead && !output && !costUsd) return undefined;
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    totalTokens: input + cacheRead + output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costUsd },
+  };
+}
+
+function terminalCandidateSignature(snapshot) {
+  return JSON.stringify([
+    snapshot?.status,
+    snapshot?.lastError,
+    snapshot?.updatedAt,
+    snapshot?.lastActivityAt,
+    snapshot?.lastUsage?.inputTokens,
+    snapshot?.lastUsage?.cachedInputTokens,
+    snapshot?.lastUsage?.outputTokens,
+  ]);
 }
 
 export function createPiMinionsExtension(pi, dependencies = {}) {
@@ -293,6 +332,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   const setRpcTimeout = dependencies.setRpcTimeout ?? setTimeout;
   const clearRpcTimeout = dependencies.clearRpcTimeout ?? clearTimeout;
   const rpcTimeoutMs = dependencies.rpcTimeoutMs ?? 10_000;
+  const watchdogIntervalMs = dependencies.watchdogIntervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
+  const paseoErrorSettleMs = dependencies.paseoErrorSettleMs ?? DEFAULT_PASEO_ERROR_SETTLE_MS;
+  const runCostCeilingUsd = dependencies.runCostCeilingUsd ?? DEFAULT_RUN_COST_CEILING_USD;
+  const setWatchdogInterval = dependencies.setWatchdogInterval ?? setInterval;
+  const clearWatchdogInterval = dependencies.clearWatchdogInterval ?? clearInterval;
   const paseoRuntime = dependencies.paseoRuntime === undefined
     ? createPaseoRuntimeFromProcess(dependencies.paseoOptions)
     : dependencies.paseoRuntime;
@@ -304,6 +348,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   let minionsRoutingRequired = false;
   let pendingSlashVariant;
   let lastContext;
+  let watchdogTimer;
+  let watchdogRunning = false;
   const earlyCompletions = new Map();
 
   function workerSnapshot(worker) {
@@ -325,6 +371,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       startedAt: worker.startedAt,
       completedAt: worker.completedAt,
       timeoutSeconds: worker.timeoutSeconds,
+      maxCostUsd: worker.maxCostUsd,
+      warningCostUsd: worker.warningCostUsd,
+      maxDurationSeconds: worker.maxDurationSeconds,
+      canonicalCwd: worker.canonicalCwd,
+      liveUsage: worker.liveUsage,
+      budgetWarningSent: worker.budgetWarningSent,
+      budgetStopReason: worker.budgetStopReason,
+      terminalCandidate: worker.terminalCandidate,
       displayNumber: worker.displayNumber,
       output: worker.output,
       progress: worker.progress,
@@ -351,6 +405,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       nextWorkerNumber: run.nextWorkerNumber,
       launchCount: run.launchCount,
       triagedCount: run.triagedCount,
+      runCostCeilingUsd: run.runCostCeilingUsd,
+      runBudgetWarningSent: run.runBudgetWarningSent,
+      dispatchBlockedReason: run.dispatchBlockedReason,
       workers: [...run.workers.values()].map(workerSnapshot),
     });
   }
@@ -366,9 +423,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const workers = new Map();
     for (const snapshot of latest.workers ?? []) {
       if (!snapshot?.id || !snapshot?.subagentRunId || !ROLE_AGENTS[snapshot.role]) continue;
+      const budget = MODEL_BUDGETS[snapshot.model] ?? MODEL_BUDGETS["gpt-5.6-terra"];
       workers.set(snapshot.id, {
         ...snapshot,
         budgetClass: snapshot.budgetClass === "closure" ? "closure" : "normal",
+        maxCostUsd: snapshot.maxCostUsd ?? budget.maxCostUsd,
+        warningCostUsd: snapshot.warningCostUsd ?? budget.warningCostUsd,
+        maxDurationSeconds: snapshot.maxDurationSeconds ?? budget.maxDurationSeconds,
+        canonicalCwd: snapshot.canonicalCwd ?? normalizeGitPath("/", snapshot.cwd),
         observedRunIds: new Set(snapshot.observedRunIds ?? []),
         triagedRunIds: new Set(snapshot.triagedRunIds ?? []),
       });
@@ -384,9 +446,13 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       launchCount: latest.launchCount ?? workers.size,
       triagedCount: latest.triagedCount ?? [...workers.values()]
         .reduce((total, worker) => total + worker.triagedRunIds.size, 0),
+      runCostCeilingUsd: latest.runCostCeilingUsd ?? runCostCeilingUsd,
+      runBudgetWarningSent: latest.runBudgetWarningSent ?? false,
+      dispatchBlockedReason: latest.dispatchBlockedReason,
       workers,
     };
     ctx.ui?.setStatus?.("pi-minions", `${run.provider} · ${run.variant} · recovered`);
+    startWatchdog();
   }
 
   function cleanupListener(event, handler, subscription) {
@@ -497,10 +563,17 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
     const discipline = requestedDiscipline(spec.task);
     const disciplineLoaded = Boolean(discipline && resolveDiscipline(discipline, cwd));
+    const budget = MODEL_BUDGETS[modelId] ?? MODEL_BUDGETS["gpt-5.6-terra"];
     return {
       modelId,
       thinking,
       cwd,
+      canonicalCwd: normalizeGitPath("/", cwd),
+      maxCostUsd: spec.maxCostUsd ?? budget.maxCostUsd,
+      warningCostUsd: spec.maxCostUsd === undefined
+        ? budget.warningCostUsd
+        : Math.round(spec.maxCostUsd * 0.67 * 100) / 100,
+      maxDurationSeconds: spec.maxDurationSeconds ?? budget.maxDurationSeconds,
       agent: ROLE_AGENTS[spec.role],
       budgetClass,
       discipline,
@@ -547,6 +620,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       status: "in-flight",
       startedAt: now(),
       timeoutSeconds: task.timeoutSeconds,
+      maxCostUsd: route.maxCostUsd,
+      warningCostUsd: route.warningCostUsd,
+      maxDurationSeconds: route.maxDurationSeconds,
+      canonicalCwd: route.canonicalCwd,
       output: "",
       observedRunIds: new Set(),
       triagedRunIds: new Set(),
@@ -560,6 +637,23 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       applyCompletion(worker, early, ctx);
     }
     return worker;
+  }
+
+  function enforceWriterLeases(tasks, routes) {
+    const occupied = new Map();
+    for (const worker of run.workers.values()) {
+      if (!WRITER_ROLES.has(worker.role) || !activeStatus(worker.status)) continue;
+      occupied.set(worker.canonicalCwd ?? normalizeGitPath("/", worker.cwd), worker);
+    }
+    for (let index = 0; index < tasks.length; index += 1) {
+      if (!WRITER_ROLES.has(tasks[index].role)) continue;
+      const canonical = routes[index].canonicalCwd;
+      const holder = occupied.get(canonical);
+      if (holder) {
+        throw new Error(`Writer worktree is leased by ${holder.role} worker ${holder.id} in status ${holder.status}: ${routes[index].cwd}`);
+      }
+      occupied.set(canonical, { id: "this spawn batch", role: tasks[index].role, status: "pending" });
+    }
   }
 
   function enforceTriageBudget(budgetClasses) {
@@ -630,17 +724,46 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   };
   globalThis[completionListenerKey] = disposeCompletionListener;
 
-  async function refreshWorker(worker, ctx) {
+  async function refreshWorker(worker, ctx, { includeActivity = true } = {}) {
     if (!activeStatus(worker.status)) return;
     const data = await runtimeCall("status", {
       ...runtimeTarget(worker),
       requestedStop: worker.status === "stopping",
+      includeActivity,
     });
     const text = typeof data?.text === "string" ? data.text : "";
     const parsed = parseStatusText(text);
+    const snapshot = data?.details?.snapshot;
+    worker.liveUsage = liveUsageFromSnapshot(snapshot) ?? worker.liveUsage;
     worker.progress = text;
+
+    if (run.runtime === "paseo" && ["running", "initializing"].includes(snapshot?.status)) {
+      worker.terminalCandidate = undefined;
+      if (worker.status !== "stopping") worker.status = "in-flight";
+      return;
+    }
+
     if (data?.details?.completion) {
-      applyCompletion(worker, data.details.completion, ctx);
+      const completion = data.details.completion;
+      const failedPaseoObservation = run.runtime === "paseo"
+        && completionStatus(completion) === "blocked"
+        && worker.status !== "stopping";
+      if (failedPaseoObservation) {
+        const signature = terminalCandidateSignature(snapshot);
+        if (worker.terminalCandidate?.signature !== signature) {
+          worker.terminalCandidate = { signature, firstSeenAt: now(), completion };
+          worker.status = "settling";
+          worker.error = completionError(completion);
+          worker.progress = `${text}\n\nPaseo failure is provisional for ${Math.ceil(paseoErrorSettleMs / 1000)}s; the worktree lease remains held while automatic retry/compaction settles.`;
+          return;
+        }
+        if (now() - worker.terminalCandidate.firstSeenAt < paseoErrorSettleMs) {
+          worker.status = "settling";
+          return;
+        }
+      }
+      worker.terminalCandidate = undefined;
+      applyCompletion(worker, completion, ctx);
       return;
     }
     if (["complete", "completed", "failed", "stopped", "paused"].includes(parsed.state)) {
@@ -657,6 +780,89 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         worker.error = `${run.runtime} reported a failed run.`;
       }
     }
+  }
+
+  function observedWorkerCost(worker) {
+    return Math.max(
+      Number(worker.liveUsage?.cost?.total) || 0,
+      Number(worker.usage?.cost?.total) || 0,
+    );
+  }
+
+  function observedRunCost() {
+    if (!run) return 0;
+    return [...run.workers.values()].reduce((total, worker) => total + observedWorkerCost(worker), 0);
+  }
+
+  async function enforceWorkerBudget(worker, ctx) {
+    if (!activeStatus(worker.status) || worker.status === "stopping") return;
+    const cost = observedWorkerCost(worker);
+    const elapsedSeconds = Math.max(0, (now() - worker.startedAt) / 1000);
+    if (!worker.budgetWarningSent && cost >= worker.warningCostUsd) {
+      worker.budgetWarningSent = true;
+      ctx?.ui?.notify?.(
+        `Minions ${worker.role} ${worker.id} reached $${cost.toFixed(2)} of its $${worker.maxCostUsd.toFixed(2)} cost ceiling.`,
+        "warning",
+      );
+    }
+    let reason;
+    if (cost >= worker.maxCostUsd) {
+      reason = `model-aware cost ceiling reached ($${cost.toFixed(2)} >= $${worker.maxCostUsd.toFixed(2)})`;
+    } else if (elapsedSeconds >= worker.maxDurationSeconds) {
+      reason = `model-aware duration ceiling reached (${Math.floor(elapsedSeconds)}s >= ${worker.maxDurationSeconds}s)`;
+    }
+    if (!reason) return;
+    const stopped = await runtimeCall("stop", runtimeTarget(worker));
+    if (stopped?.state === "running") {
+      throw new Error(`Watchdog stop was rejected for worker ${worker.id}.`);
+    }
+    worker.status = "stopping";
+    worker.budgetStopReason = reason;
+    worker.progress = `Watchdog stop requested: ${reason}. Worktree lease remains held until terminal confirmation.`;
+    ctx?.ui?.notify?.(`Minions watchdog stopped ${worker.role} ${worker.id}: ${reason}.`, "error");
+  }
+
+  async function watchdogTick() {
+    if (watchdogRunning || !run || run.runtime !== "paseo" || !lastContext) return;
+    watchdogRunning = true;
+    try {
+      const active = [...run.workers.values()].filter((worker) => activeStatus(worker.status));
+      for (const worker of active) {
+        try {
+          await refreshWorker(worker, lastContext, { includeActivity: false });
+          await enforceWorkerBudget(worker, lastContext);
+        } catch (error) {
+          worker.progress = `Watchdog status refresh unavailable: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      }
+      const runCost = observedRunCost();
+      const ceiling = run.runCostCeilingUsd ?? runCostCeilingUsd;
+      if (!run.runBudgetWarningSent && runCost >= ceiling * 0.75) {
+        run.runBudgetWarningSent = true;
+        lastContext.ui?.notify?.(`Minions run reached $${runCost.toFixed(2)} of its $${ceiling.toFixed(2)} cost ceiling.`, "warning");
+      }
+      if (runCost >= ceiling && !run.dispatchBlockedReason) {
+        run.dispatchBlockedReason = `Minions run reached its $${ceiling.toFixed(2)} cost ceiling ($${runCost.toFixed(2)} observed); no new workers may be dispatched.`;
+        lastContext.ui?.notify?.(run.dispatchBlockedReason, "error");
+      }
+      persistRun();
+    } finally {
+      watchdogRunning = false;
+    }
+  }
+
+  function startWatchdog() {
+    if (watchdogTimer !== undefined || !run || run.runtime !== "paseo") return;
+    watchdogTimer = setWatchdogInterval(() => {
+      void watchdogTick();
+    }, watchdogIntervalMs);
+    watchdogTimer?.unref?.();
+  }
+
+  function stopWatchdog() {
+    if (watchdogTimer === undefined) return;
+    clearWatchdogInterval(watchdogTimer);
+    watchdogTimer = undefined;
   }
 
   pi.registerCommand("minions", {
@@ -730,9 +936,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         nextWorkerNumber: 1,
         launchCount: 0,
         triagedCount: 0,
+        runCostCeilingUsd: params.maxRunCostUsd ?? runCostCeilingUsd,
+        runBudgetWarningSent: false,
       };
       ctx.ui?.setStatus?.("pi-minions", `${provider} · ${variant}`);
       persistRun();
+      startWatchdog();
       const runtimeLabel = selectedRuntime === "paseo" ? "Paseo native agents" : "pi-subagents RPC v1";
       return textResult(`Started ${variant} orchestration with Provider Affinity ${provider} on ${runtimeLabel}.`, {
         runId: run.id,
@@ -762,7 +971,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (run.launchCount + tasks.length > MAX_WORKER_LAUNCHES) {
         throw new Error(`Pi minions allows at most ${MAX_WORKER_LAUNCHES} worker launches per orchestration run.`);
       }
+      if (run.dispatchBlockedReason) throw new Error(run.dispatchBlockedReason);
       const routes = tasks.map((task) => resolveWorkerRoute(task, ctx));
+      enforceWriterLeases(tasks, routes);
       const settled = await Promise.allSettled(tasks.map((task, index) => runtimeCall("spawn", spawnParams(task, routes[index]))));
       const launched = settled
         .map((result, index) => ({ result, index }))
@@ -815,10 +1026,20 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         await Promise.all(selected.map(async (worker) => {
           try {
             await refreshWorker(worker, ctx);
+            await enforceWorkerBudget(worker, ctx);
           } catch (error) {
             worker.progress = `Status refresh unavailable: ${error instanceof Error ? error.message : String(error)}`;
           }
         }));
+        const runCost = observedRunCost();
+        const ceiling = run.runCostCeilingUsd ?? runCostCeilingUsd;
+        if (!run.runBudgetWarningSent && runCost >= ceiling * 0.75) {
+          run.runBudgetWarningSent = true;
+          ctx.ui?.notify?.(`Minions run reached $${runCost.toFixed(2)} of its $${ceiling.toFixed(2)} cost ceiling.`, "warning");
+        }
+        if (runCost >= ceiling && !run.dispatchBlockedReason) {
+          run.dispatchBlockedReason = `Minions run reached its $${ceiling.toFixed(2)} cost ceiling ($${runCost.toFixed(2)} observed); no new workers may be dispatched.`;
+        }
         persistRun();
       }
       for (const worker of selected) {
@@ -830,7 +1051,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       }
       const workers = selected.map(workerSnapshot);
       const summaries = workers.map((worker) => {
-        const body = worker.error || worker.output || worker.progress || "(no output yet)";
+        const body = worker.status === "settling"
+          ? (worker.progress || worker.error || "Paseo terminal state is still settling.")
+          : (worker.error || worker.output || worker.progress || "(no output yet)");
         const discipline = worker.discipline
           ? ` · discipline ${worker.discipline}${worker.disciplineLoaded ? "" : " fallback"}`
           : "";
@@ -897,6 +1120,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       worker.output = "";
       worker.progress = "";
       worker.error = undefined;
+      worker.liveUsage = undefined;
+      worker.budgetWarningSent = false;
+      worker.budgetStopReason = undefined;
+      worker.terminalCandidate = undefined;
       run.launchCount += 1;
       const early = earlyCompletions.get(resumedId);
       if (early) {
@@ -977,6 +1204,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const pendingUsage = combineUsage(...[...closing.workers.values()].map((worker) => worker.pendingUsage));
       persistRun("closed");
       run = undefined;
+      stopWatchdog();
       pendingSlashVariant = undefined;
       minionsRoutingRequired = false;
       ctx.ui?.setStatus?.("pi-minions", undefined);
@@ -1078,6 +1306,7 @@ Minions is strictly slash-command-only. Never infer, select, or start Minions fr
 
   pi.on("session_shutdown", (event) => {
     runtimeInfo = undefined;
+    stopWatchdog();
     if (run) persistRun();
     if (event.reason === "reload") disposeCompletionListener();
   });

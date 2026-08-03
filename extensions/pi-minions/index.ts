@@ -24,6 +24,11 @@ export const schemas = {
       description: "Routing profile selected by the invoked Pi minions skill.",
       default: "standard",
     }),
+    maxRunCostUsd: Type.Optional(Type.Number({
+      exclusiveMinimum: 0,
+      maximum: 500,
+      description: "Optional run-wide cost ceiling; defaults to 40 USD.",
+    })),
   }),
   spawn: Type.Object({
     tasks: Type.Array(Type.Object({
@@ -44,6 +49,16 @@ export const schemas = {
         minimum: 1,
         maximum: 3600,
         description: "Optional hard worker deadline in seconds.",
+      })),
+      maxCostUsd: Type.Optional(Type.Number({
+        exclusiveMinimum: 0,
+        maximum: 100,
+        description: "Optional worker cost ceiling; defaults are model-aware.",
+      })),
+      maxDurationSeconds: Type.Optional(Type.Integer({
+        minimum: 60,
+        maximum: 14400,
+        description: "Optional worker wall-clock ceiling; defaults are model-aware.",
       })),
     }), { minItems: 1, maxItems: 6 }),
   }),

@@ -15,6 +15,7 @@ Fixed point: <branch/SHA or discovery pending>
 Verify contract: <canonical commands or discovery pending>
 Triage budget: 0/8 soft; 0/30 hard
 Worker budget: 0/30 launches
+Cost budget: $0 / model-aware worker ceiling; $0 / run ceiling
 Lifecycle: active
 ```
 
@@ -38,7 +39,9 @@ Spawn a task only when every applicable check passes:
 5. **Verification** - implementation and gate tasks have canonical commands and
    known environment requirements.
 6. **Routing** - role and route override match [`models.md`](models.md).
-7. **Budget** - fewer than thirty worker results have been triaged and fewer than
+7. **Runtime safety** - no writer lease conflict exists; provisional Paseo failures
+   remain live for isolation, stop, and budget purposes.
+8. **Budget** - fewer than thirty worker results have been triaged and fewer than
    thirty workers have been launched. At eight or more triaged results, the task must
    be already-boarded closure work and be marked as closure through the platform adapter.
 

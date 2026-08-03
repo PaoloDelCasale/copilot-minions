@@ -288,9 +288,18 @@ non-resumable. Paseo-managed workers currently reject `timeoutSeconds` because P
 The wrapper enforces six concurrent workers and thirty launches. Eight triaged
 results trigger a soft gate that accepts only `budgetClass: "closure"` work; thirty
 results trigger the hard handoff. Implementer and architect launches require an
-explicit linked Git worktree; the runtime rejects a primary checkout before
-spawning. Worker usage is credited exactly once through `minions_read`, with
-`minions_close` flushing unread completion usage. Missed notifications are
+explicit linked Git worktree; the runtime rejects a primary checkout and holds an
+exclusive canonical-path lease until the writer is terminal. A Paseo failure remains
+provisional for two minutes so automatic retry or compaction cannot release that
+lease prematurely, and provisional workers remain explicitly stoppable.
+
+Paseo runs also have a live model-aware watchdog. Defaults are Luna `$4` warning / `$6`
+stop / 30 minutes, Sol `$10` / `$15` / 45 minutes, and Terra or Grok `$6` / `$10` /
+35 minutes. The run warns at 75% of its default `$40` ceiling and blocks new dispatch
+at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` allow explicit
+overrides. A watchdog stop retains worker and worktree ownership until Paseo confirms
+the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
+with `minions_close` flushing unread completion usage. Missed notifications are
 reconciled from the package's persistent lifecycle v3 artifact. `timeoutSeconds`
 maps to the package-owned persistent deadline.
 
