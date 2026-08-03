@@ -1,7 +1,10 @@
 # Worktrees
 
 Create one linked **Git worktree directory** per write task. Parallel writers never
-share a checkout. Under Paseo this never means creating another Paseo Workspace:
+share a checkout. The Pi runtime canonicalizes each writer path and holds an exclusive
+lease until terminal worker proof; `stopping` and provisional Paseo failures keep the
+lease. Never reuse a writer worktree merely because an error notification arrived.
+Under Paseo this never means creating another Paseo Workspace:
 all workers are native child agents in the caller's existing Workspace, and the
 absolute Git worktree path is passed to `minions_spawn` as `cwd`. Never call Paseo
 `create_workspace` for Minions isolation.

@@ -290,12 +290,21 @@ async function spawn(harness, tasks) {
 
 test("the extension registers TypeBox schemas for every public Minions tool", () => {
   const harness = createHarness();
-  assert.equal(Value.Check(harness.tools.get("minions_start").parameters, { variant: "standard" }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_start").parameters, {
+    variant: "standard",
+    maxRunCostUsd: 75,
+  }), true);
   assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
     tasks: [{ role: "explorer", task: "Inspect", timeoutSeconds: 30 }],
   }), true);
   assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
-    tasks: [{ role: "reviewer", task: "Final review", budgetClass: "closure" }],
+    tasks: [{
+      role: "reviewer",
+      task: "Final review",
+      budgetClass: "closure",
+      maxCostUsd: 12,
+      maxDurationSeconds: 2400,
+    }],
   }), true);
   assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
     tasks: [{ role: "reviewer", task: "Invalid", budgetClass: "unbounded" }],
@@ -436,6 +445,33 @@ test("writer roles require an explicit validated isolated worktree", async () =>
     spawn(invalid, [{ role: "architect", task: "Implement", cwd: "/repo" }]),
     /primary checkout is forbidden/,
   );
+});
+
+test("writer worktrees remain exclusively leased until their worker is terminal", async () => {
+  const harness = createHarness();
+  await start(harness);
+  const first = await spawn(harness, [{
+    role: "implementer",
+    task: "Implement A",
+    cwd: "/repo/.worktrees/shared",
+  }]);
+
+  await assert.rejects(spawn(harness, [{
+    role: "architect",
+    task: "Implement B",
+    cwd: "/repo/.worktrees/shared",
+  }]), /worktree is leased.*implementer/i);
+  assert.equal(harness.runtime.byMethod("spawn").length, 1);
+
+  harness.runtime.complete(first.details.workers[0].subagentRunId, { summary: "Committed A" });
+  await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  const second = await spawn(harness, [{
+    role: "architect",
+    task: "Implement B",
+    cwd: "/repo/.worktrees/shared",
+  }]);
+  assert.equal(second.details.workers[0].maxCostUsd, 15);
+  assert.equal(second.details.workers[0].maxDurationSeconds, 2700);
 });
 
 test("spawn preflights the entire batch before starting any child", async () => {
@@ -894,6 +930,121 @@ test("Pi Minions is authorized only by slash commands", async () => {
     "/skill:pi-minions build this",
     "/skill:pi-minions-lb",
   ]);
+});
+
+test("Paseo failures stay provisional, retain writer leases, and can return to running", async () => {
+  let clock = 10_000;
+  let status = "running";
+  let lastError;
+  let execution = 1;
+  const calls = [];
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") return { runtime: "paseo", methods: ["ping", "status", "spawn", "steer", "stop", "resume"] };
+      if (method === "spawn") return { details: { asyncId: `paseo:child-${execution}`, runtimeAgentId: `child-${execution++}` } };
+      if (method === "status") {
+        const snapshot = {
+          status,
+          lastError,
+          updatedAt: new Date(clock).toISOString(),
+          lastActivityAt: new Date(clock).toISOString(),
+          lastUsage: { inputTokens: 10, cachedInputTokens: 20, outputTokens: 2, totalCostUsd: 0.01 },
+        };
+        return {
+          text: `State: ${status === "running" ? "running" : "failed"}${lastError ? `\nError: ${lastError}` : ""}`,
+          details: {
+            snapshot,
+            ...(status === "idle" ? {
+              completion: {
+                runId: params.runId,
+                state: "failed",
+                success: false,
+                error: lastError,
+                endedAt: clock,
+              },
+            } : {}),
+          },
+        };
+      }
+      if (method === "stop") return { state: "stopping" };
+      throw new Error(`Unexpected method ${method}`);
+    },
+  };
+  const harness = createHarness({ dependencies: {
+    paseoRuntime,
+    now: () => clock,
+    paseoErrorSettleMs: 120_000,
+    setWatchdogInterval: () => ({ unref() {} }),
+    clearWatchdogInterval: () => {},
+  } });
+  await start(harness);
+  const spawned = await spawn(harness, [{ role: "implementer", task: "Implement", cwd: "/repo/.worktrees/shared" }]);
+  const worker = spawned.details.workers[0];
+
+  status = "idle";
+  lastError = "context window exceeded";
+  let read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.details.workers[0].status, "settling");
+  assert.match(read.content[0].text, /provisional/i);
+  await assert.rejects(spawn(harness, [{ role: "architect", task: "Unsafe reuse", cwd: "/repo/.worktrees/shared" }]), /worktree is leased/i);
+
+  clock += 60_000;
+  status = "running";
+  lastError = undefined;
+  read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.details.workers[0].status, "in-flight");
+
+  status = "idle";
+  lastError = "websocket closed";
+  read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.details.workers[0].status, "settling");
+  await execute(harness.tools.get("minions_stop"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(calls.filter((call) => call.method === "stop").length, 1);
+});
+
+test("model-aware watchdog stops expensive Sol workers and blocks over-budget runs", async () => {
+  const calls = [];
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") return { runtime: "paseo", methods: ["ping", "status", "spawn", "steer", "stop", "resume"] };
+      if (method === "spawn") return { details: { asyncId: "paseo:sol:run-1", runtimeAgentId: "sol" } };
+      if (method === "status") return {
+        text: "State: running",
+        details: {
+          snapshot: {
+            status: "running",
+            lastUsage: { inputTokens: 100, cachedInputTokens: 1_000, outputTokens: 20, totalCostUsd: 16 },
+          },
+        },
+      };
+      if (method === "stop") return { state: "stopping" };
+      throw new Error(`Unexpected method ${method}`);
+    },
+  };
+  const harness = createHarness({ dependencies: {
+    paseoRuntime,
+    runCostCeilingUsd: 10,
+    setWatchdogInterval: () => ({ unref() {} }),
+    clearWatchdogInterval: () => {},
+  } });
+  await start(harness);
+  const spawned = await spawn(harness, [{
+    role: "implementer",
+    task: "Complex Sol fix",
+    cwd: "/repo/.worktrees/sol",
+    routeOverride: "escalate-sol-high",
+  }]);
+  const worker = spawned.details.workers[0];
+  assert.equal(worker.maxCostUsd, 15);
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.details.workers[0].status, "stopping");
+  assert.match(read.details.workers[0].budgetStopReason, /cost ceiling/i);
+  assert.equal(calls.filter((call) => call.method === "stop").length, 1);
+  await assert.rejects(spawn(harness, [{ role: "explorer", task: "Too expensive" }]), /run reached its.*cost ceiling/i);
 });
 
 test("review workers load Matt's code-review discipline and use the nested-capable adapter", async () => {

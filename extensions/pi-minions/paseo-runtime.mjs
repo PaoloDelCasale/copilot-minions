@@ -149,9 +149,9 @@ function roleFromAgent(agent) {
 function buildWorkerPrompt(params, readRolePrompt) {
   const role = roleFromAgent(params.agent);
   const nestedGuidance = role === "reviewer"
-    ? "If the review contract requires two independent axes, use Paseo-managed child agents through Paseo's create_agent tool; do not use pi-subagents."
-    : "Do not create or delegate to additional agents.";
-  return `You are a Paseo-managed Minions ${role} worker. Complete only this bounded assignment.\n\n${readRolePrompt(params.agent)}\n\n## Paseo runtime constraints\n\n${nestedGuidance}\nDo not call minions_start or any minions_* orchestration tool. These Paseo constraints override any pi-subagents-specific delegation wording above.\n\n## Assignment\n\n${params.task}`;
+    ? "If the review contract requires two independent axes, you may create only those bounded nested reviewers. Track their returned IDs directly and control only those IDs; never discover or reuse agents through a workspace-wide list."
+    : "Do not create or delegate to additional agents. Never call Paseo agent lifecycle or control tools.";
+  return `You are a Paseo-managed Minions ${role} worker. Complete only this bounded assignment.\n\n${readRolePrompt(params.agent)}\n\n## Paseo runtime constraints\n\n${nestedGuidance}\nNever list, inspect, prompt, steer, stop, cancel, or resume top-level Minions workers or sibling Pi processes. Worker lifecycle belongs exclusively to the Minions frontier.\nDo not call minions_start or any minions_* orchestration tool. These Paseo constraints override any pi-subagents-specific delegation wording above.\n\n## Assignment\n\n${params.task}`;
 }
 
 function parseQualifiedModel(value) {
@@ -245,7 +245,9 @@ export function createPaseoRuntime({
         const snapshot = result?.snapshot;
         if (!snapshot) throw new Error(`Paseo returned no snapshot for agent ${params.id}.`);
         const state = paseoState(snapshot, params.requestedStop);
-        const activity = await callTool("get_agent_activity", { agentId: params.id, limit: 20 });
+        const activity = params.includeActivity === false
+          ? undefined
+          : await callTool("get_agent_activity", { agentId: params.id, limit: 20 });
         const summary = activity?.content ?? "";
         const errorLine = snapshot.lastError ? `\nError: ${snapshot.lastError}` : "";
         const permissionLine = snapshot.pendingPermissions?.length
