@@ -728,6 +728,39 @@ test("a failed or paused worker can be resumed without losing its Minions identi
   });
 });
 
+test("a completed architect can resume as the same routed architecture owner", async () => {
+  const harness = createHarness();
+  await start(harness);
+  const spawned = await spawn(harness, [{
+    role: "architect",
+    task: "Implement the cross-cutting slice",
+    cwd: "/repo/.worktrees/architecture-owner",
+  }]);
+  const original = spawned.details.workers[0];
+  harness.runtime.complete(original.subagentRunId, {
+    summary: "Initial architecture implementation complete",
+  });
+  await execute(harness.tools.get("minions_read"), {
+    workerIds: [original.id],
+  }, harness.ctx);
+
+  const resumed = await execute(harness.tools.get("minions_resume"), {
+    workerId: original.id,
+    message: "Continue the same slice with the new reviewer findings",
+  }, harness.ctx);
+  assert.equal(resumed.details.worker.id, original.id);
+  assert.notEqual(resumed.details.worker.subagentRunId, original.subagentRunId);
+  assert.equal(resumed.details.worker.role, "architect");
+  assert.equal(resumed.details.worker.model, "gpt-5.6-sol");
+  assert.equal(resumed.details.worker.thinking, "medium");
+  assert.equal(resumed.details.worker.cwd, "/repo/.worktrees/architecture-owner");
+  assert.equal(resumed.details.worker.status, "in-flight");
+  assert.deepEqual(harness.runtime.byMethod("resume")[0].params, {
+    id: original.subagentRunId,
+    message: "Continue the same slice with the new reviewer findings",
+  });
+});
+
 test("close restores the original provider model and flushes unread usage", async () => {
   const harness = createHarness({ provider: "github-copilot", modelId: "gpt-4.1" });
   await start(harness);

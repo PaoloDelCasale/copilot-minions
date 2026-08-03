@@ -31,7 +31,10 @@ full board.
 
 Notes include worktree, branch, `based-on:`, `fixed:`, issue, model and effort,
 `round:` (maximum five), native worker/thread ID, verify result, and commit SHA.
-Keep done and cancelled rows until close.
+When an architect writes a slice, also record it as the current
+`architecture-owner: <worker ID>` and retain it across review rounds. A resumed owner
+keeps that ID; each execution still increments Workers and each result increments
+Triage. Keep done and cancelled rows until close.
 
 Phases:
 

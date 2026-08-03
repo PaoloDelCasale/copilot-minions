@@ -20,20 +20,43 @@ The reviewer compares the cumulative diff with the complete issue acceptance cri
 including migrations, authorization invariants, compatibility, rollback, and cross-slice
 interactions. Repeat an integrated review before landing the final stack.
 
+## Architecture owner
+
+When an `architect` writes a slice, record its worker ID as the slice's current
+`architecture-owner`. Keep every reviewer fresh and independent, but prefer resuming
+that completed architect for a later architectural fix when Goal, Spec, `fixed:`, and
+worktree are unchanged. Send only the current HEAD, verbatim new findings, cumulative
+invariants, regression matrix, and verify delta; the retained worker context already
+contains the original discovery and design history.
+
+A continuation still consumes one launch and one triage result. Resumed workers retain
+their original budget class, so a normal architecture owner can be resumed only before
+the soft closure gate; if it is ineligible, spawn a fresh closure architect. Never
+retain an owner merely to avoid a justified fresh context.
+
 1. **Implement** - role `implementer` or `architect`; pass the verify gate and commit.
+   Whenever the writer is an architect, record it as `architecture-owner`.
 2. **Review** - fresh role `reviewer`; review commits since `fixed:` without rerunning
    verification. Increment `round:` on the board.
 3. `REVIEW_APPROVED` - run the gate, then role `mechanical` commits review fixes or
    reports the unchanged HEAD.
-4. `REVIEW_CHANGES_REQUIRED` - if `round:` is below five, respawn an implementer for
-   fix-review, then use a fresh reviewer. After the second changes-required result on
-   one slice, the next fix uses role `architect` and receives the cumulative findings,
-   invariants, and a complete regression-test matrix. At round five, stop and ask the
-   user instead of dispatching another fix.
+4. `REVIEW_CHANGES_REQUIRED` - if `round:` is below five, use an `implementer` for a
+   bounded local fix. Use an `architect` when the findings require cross-cutting design,
+   concurrency, transaction, rollback, recovery, or security-invariant changes, and
+   always after the second changes-required result on one slice. Resume an eligible
+   `architecture-owner`; otherwise spawn a fresh architect. Give it cumulative findings,
+   invariants, and a complete regression-test matrix. Then use a fresh reviewer. At
+   round five, stop and ask the user instead of dispatching another fix.
+
+Route post-review gate repairs to the least expensive capable role: environment and
+command repair is `mechanical`; assertion, fixture, or compatibility fixes against an
+already-established contract are `implementer`; use `architect` only if the product
+contract or a cross-cutting invariant must change.
 
 Never resume a worker after `BLOCKED`, `NEEDS_CONTEXT`, environment repair, steering,
-or a changed spec. Spawn a fresh worker with the delta folded into the prompt and mark
-the previous worker superseded.
+or a changed Goal, Spec, fixed point, or worktree. A reviewer delta against the same
+slice is not a changed spec. For ineligible continuation, spawn a fresh worker with the
+delta folded into the prompt and mark the previous worker superseded.
 
 ## Repository discovery
 

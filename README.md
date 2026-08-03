@@ -277,9 +277,13 @@ Workspace: linked Git worktrees provide write isolation and are passed only as w
 `cwd` values. Minions projects Paseo status, recent activity, token/cost usage,
 cancellation, and follow-up runs onto the same `minions_*` interface. Paseo keeps one native agent ID
 while Minions assigns a new execution ID to each resumed run so launch and triage
-budgets remain exact. Minions persists both IDs across reloads. Deliberately stopped
-workers remain non-resumable. Paseo-managed workers currently reject
-`timeoutSeconds` because Paseo 0.2.5 does not expose a persistent child deadline.
+budgets remain exact. Minions persists both IDs across reloads. Paused, failed, and
+completed workers can be resumed; a completed architect may remain the same-slice
+architecture owner when Goal, Spec, fixed point, worktree, and budget eligibility are
+unchanged. Reviewers remain fresh and independent, while simple gate or compatibility
+fixes stay on mechanical or implementer routes. Deliberately stopped workers remain
+non-resumable. Paseo-managed workers currently reject `timeoutSeconds` because Paseo
+0.2.5 does not expose a persistent child deadline.
 
 The wrapper enforces six concurrent workers and thirty launches. Eight triaged
 results trigger a soft gate that accepts only `budgetClass: "closure"` work; thirty
