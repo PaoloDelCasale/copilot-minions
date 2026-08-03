@@ -26,9 +26,11 @@ Inside Pi, this adapter takes precedence over the Codex adapter discovered from
 `STATUS: NEEDS_USER_INPUT`.
 
 Implementer and architect tasks must pass an absolute linked-worktree `cwd`; the
-adapter rejects the primary checkout. A failed or paused package run may be revived
-with `minions_resume` while keeping the same Minions worker ID. A worker deliberately
-stopped with `minions_stop` is not resumable. Paseo and generic `pi-subagents`
+adapter rejects the primary checkout. A paused, failed, or completed package run may
+be revived with `minions_resume` while keeping the same Minions worker ID. Use this
+for a same-slice architecture owner only while Goal, Spec, fixed point, worktree, and
+budget eligibility remain unchanged. A worker deliberately stopped with
+`minions_stop` is not resumable. Paseo and generic `pi-subagents`
 completion notifications are signals to call `minions_read`; do not bypass the
 adapter with generic `subagent`, MCP `create_agent`, `send_agent_prompt`, or
 `create_workspace` tools for top-level dispatch. In particular, a linked Git worktree

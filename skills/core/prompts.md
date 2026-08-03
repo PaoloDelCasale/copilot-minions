@@ -49,6 +49,19 @@ Output: commit SHA, message, verify one-liner, diff stat.
 STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | NEEDS_USER_INPUT | BLOCKED
 ```
 
+### Architect preflight
+
+For role `architect`, require this analysis before editing:
+
+- enumerate preserved invariants and explicit compatibility seams;
+- map lock, transaction, validation/use, rollback, and restart-recovery boundaries;
+- identify failures before, during, and after each durable mutation;
+- build adversarial regression cases for concurrency, stale state, and partial failure;
+- prefer the smallest design that closes the matrix without broadening the Spec.
+
+Record the architect worker ID as `architecture-owner` for its slice. This preflight
+is implementation reasoning, not self-review; the later reviewer must still be fresh.
+
 ## Review
 
 ```text
@@ -130,6 +143,33 @@ Constraints:
 Output: verify result and diff stat.
 STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED
 ```
+
+## Architect continuation
+
+Resume a completed `architecture-owner` only for the same Goal, Spec, fixed point, and
+worktree. The follow-up message is a compact delta:
+
+```text
+Task ID: <id>
+Role: architect continuation
+Current HEAD: <SHA and dirty/clean state>
+Changes: <verbatim new reviewer findings>
+Cumulative invariants: <unresolved and previously fixed invariants>
+Regression matrix: <new and retained adversarial cases>
+Verify delta: <focused commands; canonical contract remains in retained context>
+
+Constraints:
+- Use retained context; inspect the current diff and finding locations first.
+- Reproduce each new issue with a failing test where practical.
+- Fix only the findings and direct consequences.
+- Do not self-review or commit; a fresh review and mechanical commit follow.
+
+Output: design delta, verify result, diff stat.
+STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED
+```
+
+Do not use an architect continuation for environment repair, assertion-only changes
+against an established contract, a changed specification, or a different worktree.
 
 ## Commit
 
