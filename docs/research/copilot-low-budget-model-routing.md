@@ -27,7 +27,10 @@ Named routes:
 
 The runtime's structured-evidence gate is essential to the cost model: a normal task
 cannot select Grok or Sol merely because it is complex. Grok requires an adverse,
-terminal, already-triaged source worker; Sol remains the later escalation.
+terminal, already-triaged source worker; Sol remains the later escalation. An invalid
+override is audited and downgraded to the normal role route, avoiding both overspend
+and retry loops that mutate explorer, implementer, or reviewer work into mechanical
+jobs.
 
 ## Evidence
 

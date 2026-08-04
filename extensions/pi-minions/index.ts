@@ -56,7 +56,7 @@ export const schemas = {
         "escalate-sol-high",
         "escalate-sol-max",
       ] as const, {
-        description: "Exceptional named route only. Omit for normal dispatch; overrideReason is mandatory, and escalation also requires overrideFromWorkerId.",
+        description: "Exceptional named route only. Omit for normal dispatch; overrideReason is mandatory, and escalation also requires overrideFromWorkerId. Invalid overrides are audited and downgraded to the normal role route.",
       })),
       overrideReason: Type.Optional(OverrideReason),
       overrideFromWorkerId: Type.Optional(Type.String({

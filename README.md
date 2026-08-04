@@ -263,7 +263,9 @@ overlay's `models.md`, `skills/core/model-rationale.md`, and
 Normal worker dispatch is runtime-locked to this role matrix. Named judgment routes
 require a structured merge-conflict or GitHub-judgment reason; escalation routes
 require a terminal, triaged source worker whose recorded result proves the matching
-failure condition. An initial or merely complex task cannot self-promote to Sol.
+failure condition. An initial or merely complex task cannot self-promote to Sol. An
+invalid override is audited and downgraded to the normal role route rather than
+failing the spawn, preventing retry loops from mutating semantic roles.
 
 ### Pi provider affinity and Paseo runtime selection
 
