@@ -288,8 +288,10 @@ completed workers can be resumed; a completed architect may remain the same-slic
 architecture owner when Goal, Spec, fixed point, worktree, and budget eligibility are
 unchanged. Reviewers remain fresh and independent, while simple gate or compatibility
 fixes stay on mechanical or implementer routes. Deliberately stopped workers remain
-non-resumable. Paseo-managed workers currently reject `timeoutSeconds` because Paseo
-0.2.5 does not expose a persistent child deadline.
+non-resumable. Paseo 0.2.5 does not expose a provider-persistent child deadline, so
+frontiers omit `timeoutSeconds` and use the model-aware watchdog. If an accidental
+Paseo timeout is supplied, the wrapper maps it to the stricter watchdog duration
+instead of forwarding an unsupported deadline.
 
 The wrapper enforces six concurrent workers and thirty launches. Eight triaged
 results trigger a soft gate that accepts only `budgetClass: "closure"` work; thirty
@@ -307,8 +309,8 @@ at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` allow ex
 overrides. A watchdog stop retains worker and worktree ownership until Paseo confirms
 the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
 with `minions_close` flushing unread completion usage. Missed notifications are
-reconciled from the package's persistent lifecycle v3 artifact. `timeoutSeconds`
-maps to the package-owned persistent deadline.
+reconciled from the package's persistent lifecycle v3 artifact. Outside Paseo,
+`timeoutSeconds` maps to the package-owned persistent deadline.
 
 ### Low-budget stack
 

@@ -1101,6 +1101,47 @@ test("review workers load Matt's code-review discipline and use the nested-capab
   assert.equal(params.skill, "code-review");
 });
 
+test("blank model overrides fall back and Paseo deadlines use the watchdog", async () => {
+  const calls = [];
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") {
+        return { runtime: "paseo", methods: ["ping", "status", "spawn", "steer", "stop", "resume"] };
+      }
+      if (method === "spawn") {
+        return {
+          details: {
+            asyncId: "paseo:child-hotfix:execution-1",
+            runtimeAgentId: "child-hotfix",
+          },
+        };
+      }
+      throw new Error(`Unexpected Paseo method: ${method}`);
+    },
+  };
+  const harness = createHarness({
+    provider: "github-copilot",
+    dependencies: { paseoRuntime },
+  });
+  await start(harness);
+  const result = await spawn(harness, [{
+    role: "mechanical",
+    task: "Inspect issue",
+    routeOverride: "mechanical-judgment",
+    modelOverride: "   ",
+    timeoutSeconds: 900,
+    maxDurationSeconds: 1800,
+  }]);
+
+  const spawnCall = calls.find((call) => call.method === "spawn");
+  assert.equal(spawnCall.params.model, "github-copilot/gpt-5.6-terra:max");
+  assert.equal(Object.hasOwn(spawnCall.params, "timeoutMs"), false);
+  assert.equal(result.details.workers[0].timeoutSeconds, 900);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 900);
+});
+
 test("Paseo sessions use native child agents without dispatching pi-subagents", async () => {
   const calls = [];
   let execution = 1;

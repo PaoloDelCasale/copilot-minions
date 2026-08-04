@@ -35,5 +35,10 @@ completion notifications are signals to call `minions_read`; do not bypass the
 adapter with generic `subagent`, MCP `create_agent`, `send_agent_prompt`, or
 `create_workspace` tools for top-level dispatch. In particular, a linked Git worktree
 passed as `cwd` is write isolation inside the existing Paseo Workspace, not a request
-to create another Workspace. Paseo does not yet expose a persistent deadline through
-this adapter, so omit `timeoutSeconds` for Paseo-managed workers.
+to create another Workspace. Paseo does not yet expose a provider-persistent child
+deadline through this adapter, so omit `timeoutSeconds` for Paseo-managed workers and
+use `maxDurationSeconds` for
+the Minions watchdog. The runtime defensively maps an accidental Paseo
+`timeoutSeconds` value to the stricter watchdog duration instead of forwarding an
+unsupported child deadline. Omit `modelOverride` entirely unless the user explicitly
+requested one; never pass an empty string.

@@ -557,7 +557,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const route = spec.routeOverride ? matrix.overrides[spec.routeOverride] : roleRoute;
     if (!route) throw new Error(`Route override ${spec.routeOverride} is not available for ${run.variant}.`);
     const [defaultModel, thinking] = route;
-    const modelId = spec.modelOverride ?? defaultModel;
+    const requestedModel = typeof spec.modelOverride === "string" ? spec.modelOverride.trim() : "";
+    const modelId = requestedModel || defaultModel;
     if (!ctx.modelRegistry.find(run.provider, modelId)) {
       throw new Error(`Provider ${run.provider} does not offer requested model ${modelId}.`);
     }
@@ -570,6 +571,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const discipline = requestedDiscipline(spec.task);
     const disciplineLoaded = Boolean(discipline && resolveDiscipline(discipline, cwd));
     const budget = MODEL_BUDGETS[modelId] ?? MODEL_BUDGETS["gpt-5.6-terra"];
+    const configuredMaxDurationSeconds = spec.maxDurationSeconds ?? budget.maxDurationSeconds;
+    const maxDurationSeconds = run.runtime === "paseo" && spec.timeoutSeconds
+      ? Math.min(configuredMaxDurationSeconds, spec.timeoutSeconds)
+      : configuredMaxDurationSeconds;
     return {
       modelId,
       thinking,
@@ -579,7 +584,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       warningCostUsd: spec.maxCostUsd === undefined
         ? budget.warningCostUsd
         : Math.round(spec.maxCostUsd * 0.67 * 100) / 100,
-      maxDurationSeconds: spec.maxDurationSeconds ?? budget.maxDurationSeconds,
+      maxDurationSeconds,
       agent: ROLE_AGENTS[spec.role],
       budgetClass,
       discipline,
@@ -597,7 +602,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       async: true,
       clarify: false,
       artifacts: true,
-      ...(spec.timeoutSeconds ? { timeoutMs: spec.timeoutSeconds * 1_000 } : {}),
+      ...(spec.timeoutSeconds && run.runtime !== "paseo" ? { timeoutMs: spec.timeoutSeconds * 1_000 } : {}),
       ...(route.disciplineLoaded ? { skill: route.discipline } : {}),
       control: {
         enabled: true,
