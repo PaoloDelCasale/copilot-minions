@@ -542,7 +542,12 @@ test("provider and low-budget matrices are preserved through per-run model overr
     { provider: "github-copilot", variant: "standard", role: "architect", expected: "github-copilot/claude-opus-5:xhigh" },
     { provider: "github-copilot", variant: "standard", role: "reviewer", expected: "github-copilot/gpt-5.6-sol:high" },
     { provider: "github-copilot", variant: "standard", role: "planner", expected: "github-copilot/gpt-5.6-terra:max" },
+    { provider: "github-copilot", variant: "lb", role: "mechanical", expected: "github-copilot/gpt-5.6-luna:high" },
+    { provider: "github-copilot", variant: "lb", role: "explorer", expected: "github-copilot/gpt-5.6-luna:max" },
+    { provider: "github-copilot", variant: "lb", role: "implementer", expected: "github-copilot/gpt-5.6-luna:max" },
+    { provider: "github-copilot", variant: "lb", role: "architect", expected: "github-copilot/gpt-5.6-luna:max" },
     { provider: "github-copilot", variant: "lb", role: "reviewer", expected: "github-copilot/gpt-5.6-sol:low" },
+    { provider: "github-copilot", variant: "lb", role: "planner", expected: "github-copilot/gpt-5.6-luna:max" },
   ];
   for (const entry of cases) {
     const harness = createHarness({ provider: entry.provider });
@@ -612,6 +617,34 @@ test("named escalation routes retain their provider-specific model and effort", 
   assert.deepEqual(
     copilot.runtime.byMethod("spawn").slice(-2).map((call) => call.params.model),
     ["github-copilot/gpt-5.6-terra:max", "github-copilot/gpt-5.6-sol:high"],
+  );
+});
+
+test("Copilot low-budget judgment and first escalation use Luna then Grok", async () => {
+  const harness = createHarness({ provider: "github-copilot" });
+  await start(harness, "lb");
+  const prior = await spawn(harness, [{ role: "explorer", task: "Initial Luna discovery" }]);
+  harness.runtime.complete(prior.details.workers[0].subagentRunId, {
+    success: false,
+    state: "failed",
+    summary: "STATUS: BLOCKED\nLuna could not resolve repository context.",
+  });
+  await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  await spawn(harness, [{
+    role: "mechanical",
+    task: "Resolve merge conflict",
+    routeOverride: "mechanical-judgment",
+    overrideReason: "merge-conflict",
+  }, {
+    role: "explorer",
+    task: "Escalate repository discovery",
+    routeOverride: "escalate-entry",
+    overrideReason: "blocked",
+    overrideFromWorkerId: prior.details.workers[0].id,
+  }]);
+  assert.deepEqual(
+    harness.runtime.byMethod("spawn").slice(-2).map((call) => call.params.model),
+    ["github-copilot/gpt-5.6-luna:max", "github-copilot/grok-4.5:high"],
   );
 });
 

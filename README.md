@@ -338,11 +338,17 @@ GitHub Copilot (native and Pi):
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| Mechanical / explorer / implementer / architect / planner | `grok-4.5` | high |
+| Mechanical | `gpt-5.6-luna` | high |
+| Explorer / implementer / architect / planner | `gpt-5.6-luna` | max |
 | Reviewer | `gpt-5.6-sol` | low |
 
-Unlike the source configuration, LB does not add a separate validator or make review
-selective. Verify and mandatory review gates remain unchanged.
+The Copilot LB profile tries Luna first and reserves `grok-4.5:high` for the
+first evidence-backed escalation. This materially reduces expected spend while Sol
+low keeps review independent. See
+`docs/research/copilot-low-budget-model-routing.md` for the benchmark and pricing
+rationale. Unlike the source configuration, LB does not add a
+separate validator or make review selective. Verify and mandatory review gates remain
+unchanged.
 
 ## Source layout
 
