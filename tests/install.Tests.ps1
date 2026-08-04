@@ -62,6 +62,8 @@ if "%1"=="--list-models" (
   echo openai-codex gpt-5.6-sol
   echo openai-codex gpt-5.6-terra
   echo openai-codex gpt-5.6-luna
+  echo github-copilot claude-opus-5
+  echo github-copilot gpt-5.6-luna
   echo github-copilot gpt-5.6-sol
   echo github-copilot gpt-5.6-terra
   if "%MINIONS_TEST_PI_MODELS%"=="near-grok" (
@@ -130,7 +132,10 @@ exit /b 0
     Assert-True (-not $paseoInstallLog.Contains('pi-subagents')) 'Paseo platform does not install the ordinary Pi worker runtime'
     Assert-True (Test-Path (Join-Path $copilotSkill 'platform.md')) 'Copilot contains adapter'
     Assert-True (Test-Path (Join-Path $codexSkill 'platform.md')) 'Codex contains adapter'
-    Assert-True ((Get-Content (Join-Path $copilotSkill 'models.md') -Raw) -match 'mechanical.*grok-4\.5.*high') 'Copilot gets its provider matrix'
+    $copilotModels = Get-Content (Join-Path $copilotSkill 'models.md') -Raw
+    Assert-True ($copilotModels -match 'mechanical.*gpt-5\.6-luna.*high') 'Copilot gets its provider matrix'
+    Assert-True ($copilotModels -match 'explorer.*claude-opus-5.*high') 'Copilot gets its quality explorer route'
+    Assert-True ($copilotModels -match 'architect.*claude-opus-5.*xhigh') 'Copilot gets its quality architecture route'
     Assert-True ((Get-Content (Join-Path $codexSkill 'models.md') -Raw) -match 'mechanical.*gpt-5\.6-luna.*low') 'Codex keeps its provider matrix'
     $piModels = Get-Content (Join-Path $piSkill 'models.md') -Raw
     Assert-True ($piModels.Contains('## `openai-codex`')) 'Pi documents the Codex matrix'

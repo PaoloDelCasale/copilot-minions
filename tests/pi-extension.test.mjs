@@ -218,7 +218,7 @@ function createHarness({
     },
   };
   const defaultCatalog = provider === "github-copilot"
-    ? ["gpt-5.6-sol", "gpt-5.6-terra", "grok-4.5"]
+    ? ["claude-opus-5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "grok-4.5"]
     : ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
   const catalogs = modelCatalogs ?? { [provider]: defaultCatalog };
   const models = Object.entries(catalogs).flatMap(([catalogProvider, ids]) => ids
@@ -375,12 +375,19 @@ test("Provider Affinity rejects unsupported providers and missing exact routes",
   await assert.rejects(start(missing), /missing required model.*gpt-5\.6-luna/);
   assert.equal(missing.runtime.byMethod("ping").length, 0);
 
-  const missingCopilot = createHarness({
+  const missingCopilotLb = createHarness({
     provider: "github-copilot",
     missingModels: ["grok-4.5"],
   });
-  await assert.rejects(start(missingCopilot), /missing required model.*grok-4\.5/);
-  assert.equal(missingCopilot.runtime.byMethod("ping").length, 0);
+  await assert.rejects(start(missingCopilotLb, "lb"), /missing required model.*grok-4\.5/);
+  assert.equal(missingCopilotLb.runtime.byMethod("ping").length, 0);
+
+  const missingCopilotArchitect = createHarness({
+    provider: "github-copilot",
+    missingModels: ["claude-opus-5"],
+  });
+  await assert.rejects(start(missingCopilotArchitect), /missing required model.*claude-opus-5/);
+  assert.equal(missingCopilotArchitect.runtime.byMethod("ping").length, 0);
 });
 
 test("spawn delegates to the namespaced agent with qualified model, timeout, and explicit discipline", async () => {
@@ -517,7 +524,12 @@ test("a partially failed RPC batch retains every launched child through terminal
 test("provider and low-budget matrices are preserved through per-run model overrides", async () => {
   const cases = [
     { provider: "openai-codex", variant: "lb", role: "architect", expected: "openai-codex/gpt-5.6-luna:high" },
-    { provider: "github-copilot", variant: "standard", role: "mechanical", expected: "github-copilot/grok-4.5:high" },
+    { provider: "github-copilot", variant: "standard", role: "mechanical", expected: "github-copilot/gpt-5.6-luna:high" },
+    { provider: "github-copilot", variant: "standard", role: "explorer", expected: "github-copilot/claude-opus-5:high" },
+    { provider: "github-copilot", variant: "standard", role: "implementer", expected: "github-copilot/gpt-5.6-terra:max" },
+    { provider: "github-copilot", variant: "standard", role: "architect", expected: "github-copilot/claude-opus-5:xhigh" },
+    { provider: "github-copilot", variant: "standard", role: "reviewer", expected: "github-copilot/gpt-5.6-sol:high" },
+    { provider: "github-copilot", variant: "standard", role: "planner", expected: "github-copilot/gpt-5.6-terra:max" },
     { provider: "github-copilot", variant: "lb", role: "reviewer", expected: "github-copilot/gpt-5.6-sol:low" },
   ];
   for (const entry of cases) {
@@ -526,22 +538,52 @@ test("provider and low-budget matrices are preserved through per-run model overr
     await spawn(harness, [{
       role: entry.role,
       task: entry.role,
-      ...(entry.role === "architect" ? { cwd: "/repo/.worktrees/a" } : {}),
+      ...(["implementer", "architect"].includes(entry.role) ? { cwd: `/repo/.worktrees/${entry.role}` } : {}),
     }]);
     assert.equal(harness.runtime.byMethod("spawn")[0].params.model, entry.expected);
   }
 });
 
-test("named escalation routes retain their exact model and effort", async () => {
-  const harness = createHarness();
+test("Copilot Opus architects receive the explicit quality-route watchdog budget", async () => {
+  const harness = createHarness({ provider: "github-copilot" });
   await start(harness);
-  await spawn(harness, [{
+  const result = await spawn(harness, [{
+    role: "architect",
+    task: "Design and implement",
+    cwd: "/repo/.worktrees/opus-architect",
+  }]);
+  assert.equal(result.details.workers[0].maxCostUsd, 15);
+  assert.equal(result.details.workers[0].warningCostUsd, 10);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 3000);
+});
+
+test("named escalation routes retain their provider-specific model and effort", async () => {
+  const codex = createHarness();
+  await start(codex);
+  await spawn(codex, [{
     role: "implementer",
     task: "Retry",
-    cwd: "/repo/.worktrees/retry",
+    cwd: "/repo/.worktrees/retry-codex",
     routeOverride: "escalate-sol-max",
   }]);
-  assert.equal(harness.runtime.byMethod("spawn")[0].params.model, "openai-codex/gpt-5.6-sol:max");
+  assert.equal(codex.runtime.byMethod("spawn")[0].params.model, "openai-codex/gpt-5.6-sol:max");
+
+  const copilot = createHarness({ provider: "github-copilot" });
+  await start(copilot);
+  await spawn(copilot, [{
+    role: "mechanical",
+    task: "Resolve conflict",
+    routeOverride: "mechanical-judgment",
+  }, {
+    role: "implementer",
+    task: "Escalated retry",
+    cwd: "/repo/.worktrees/retry-copilot",
+    routeOverride: "escalate-entry",
+  }]);
+  assert.deepEqual(
+    copilot.runtime.byMethod("spawn").map((call) => call.params.model),
+    ["github-copilot/gpt-5.6-terra:max", "github-copilot/gpt-5.6-sol:high"],
+  );
 });
 
 test("the wrapper enforces six concurrent workers", async () => {

@@ -1,21 +1,26 @@
 # GitHub Copilot model routing
 
+The standard profile is quality-first, but assigns each role the least expensive
+model that remains strong on its relevant coding-agent benchmark. See the
+[research and pricing snapshot](https://github.com/PaoloDelCasale/copilot-minions/blob/main/docs/research/copilot-standard-model-routing.md)
+for the supporting evidence.
+
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| `mechanical` | `grok-4.5` | high |
-| `explorer` | `grok-4.5` | high |
-| `implementer` | `grok-4.5` | high |
-| `architect` | `gpt-5.6-sol` | medium |
-| `reviewer` | `gpt-5.6-sol` | low |
-| `planner` | `gpt-5.6-terra` | high |
+| `mechanical` | `gpt-5.6-luna` | high |
+| `explorer` | `claude-opus-5` | high |
+| `implementer` | `gpt-5.6-terra` | max |
+| `architect` | `claude-opus-5` | xhigh |
+| `reviewer` | `gpt-5.6-sol` | high |
+| `planner` | `gpt-5.6-terra` | max |
 
 ## Named route overrides
 
 | Override | Model | Reasoning |
 |----------|-------|-----------|
-| `mechanical-judgment` | `gpt-5.6-sol` | low |
-| `escalate-entry` | `gpt-5.6-sol` | medium |
+| `mechanical-judgment` | `gpt-5.6-terra` | max |
+| `escalate-entry` | `gpt-5.6-sol` | high |
 | `escalate-sol-medium` | `gpt-5.6-sol` | medium |
 | `escalate-sol-high` | `gpt-5.6-sol` | high |
 | `escalate-sol-max` | `gpt-5.6-sol` | max |

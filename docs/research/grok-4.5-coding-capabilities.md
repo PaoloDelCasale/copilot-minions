@@ -1,5 +1,10 @@
 # Grok 4.5 coding capabilities and minions-routing assessment
 
+> **Historical snapshot.** This 2026-07-29 single-model assessment predates GitHub's
+> current Luna pricing and the standard profile's full portfolio review. For the
+> active routing decision, use
+> [`copilot-standard-model-routing.md`](copilot-standard-model-routing.md).
+
 **Access date:** 2026-07-29  
 **Scope:** Grok 4.5 only; GitHub Copilot availability and routing; no production-code changes.
 
