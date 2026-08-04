@@ -1,20 +1,25 @@
 # GitHub Copilot low-budget model routing
 
+The profile tries inexpensive Luna first, retains Sol low as an independent review
+gate, and permits Grok only as an evidence-backed first escalation. See the
+[research note](https://github.com/PaoloDelCasale/copilot-minions/blob/main/docs/research/copilot-low-budget-model-routing.md)
+for benchmark and pricing evidence.
+
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| `mechanical` | `grok-4.5` | high |
-| `explorer` | `grok-4.5` | high |
-| `implementer` | `grok-4.5` | high |
-| `architect` | `grok-4.5` | high |
+| `mechanical` | `gpt-5.6-luna` | high |
+| `explorer` | `gpt-5.6-luna` | max |
+| `implementer` | `gpt-5.6-luna` | max |
+| `architect` | `gpt-5.6-luna` | max |
 | `reviewer` | `gpt-5.6-sol` | low |
-| `planner` | `grok-4.5` | high |
+| `planner` | `gpt-5.6-luna` | max |
 
 ## Named route overrides
 
 | Override | Model | Reasoning |
 |----------|-------|-----------|
-| `mechanical-judgment` | `grok-4.5` | high |
+| `mechanical-judgment` | `gpt-5.6-luna` | max |
 | `escalate-entry` | `grok-4.5` | high |
 | `escalate-sol-low` | `gpt-5.6-sol` | low |
 | `escalate-sol-medium` | `gpt-5.6-sol` | medium |

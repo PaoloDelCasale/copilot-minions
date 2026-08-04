@@ -3,7 +3,8 @@
 Routing differs by provider. OpenAI Codex retains Luna for bounded daily work, Sol
 for complex implementation, review, and escalation, and Terra for structured
 planning. GitHub Copilot's standard profile is a quality-first portfolio selected
-from its broader catalog; its low-budget profile remains unchanged.
+from its broader catalog; its low-budget profile is Luna-first with evidence-gated
+Grok and Sol escalation.
 
 | Route kind | OpenAI Codex | GitHub Copilot standard | Rationale |
 |------------|--------------|-------------------------|-----------|
@@ -17,6 +18,7 @@ from its broader catalog; its low-budget profile remains unchanged.
 
 The Copilot matrix and its pricing snapshot are supported by the repository's
 [research note](https://github.com/PaoloDelCasale/copilot-minions/blob/main/docs/research/copilot-standard-model-routing.md).
-Benchmarks are selection evidence, not guarantees for the Pi or native Copilot harness. Required-model checks resolve
+Benchmarks are selection evidence, not guarantees for the Pi or native Copilot
+harness. Required-model checks resolve
 all IDs against the selected provider's own catalog and never fall back across
 providers.

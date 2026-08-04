@@ -209,8 +209,12 @@ bash "${ROOT}/install.sh" --platform all --variant all >/dev/null
 [[ -f "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/SKILL.md" ]]
 [[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/SKILL.md" ]]
 [[ -f "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/control.md" ]]
-grep -Eq 'architect.*grok-4\.5.*high' "${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/models.md"
+COPILOT_LB_MODELS="${MINIONS_HOME}/.copilot/skills/copilot-minions-lb/models.md"
+grep -Eq 'mechanical.*gpt-5\.6-luna.*high' "${COPILOT_LB_MODELS}"
+grep -Eq 'architect.*gpt-5\.6-luna.*max' "${COPILOT_LB_MODELS}"
+grep -Eq 'escalate-entry.*grok-4\.5.*high' "${COPILOT_LB_MODELS}"
 grep -Fq 'gpt-5.6-luna:xhigh' "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/models.md"
+grep -Fq 'gpt-5.6-luna:max' "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/models.md"
 grep -Fq 'grok-4.5:high' "${MINIONS_HOME}/.pi/agent/skills/pi-minions-lb/models.md"
 [[ "$(count_files "${AGENTS}"/codex-minions*.toml)" -eq 12 ]]
 [[ -f "${AGENTS}/.codex-minions-lb-manifest" ]]

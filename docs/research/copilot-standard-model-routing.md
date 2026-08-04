@@ -130,7 +130,7 @@ Source: [Artificial Analysis coding-agent benchmarks](https://artificialanalysis
 | Model | Why it is not in the standard matrix |
 |-------|--------------------------------------|
 | Claude Fable 5 | Strong results, but slightly below Opus/Sol in coding while GitHub lists twice Opus's input and output prices; fallback behavior also complicates attribution. |
-| Grok 4.5 | Better terminal score and price than Opus high, but 1.07 points lower on the explorer's primary SWE-Atlas-QnA benchmark. It remains the low-budget explorer route. |
+| Grok 4.5 | Better terminal score and price than Opus high, but 1.07 points lower on the explorer's primary SWE-Atlas-QnA benchmark. In the low-budget profile it is reserved for evidence-backed escalation after Luna. |
 | Claude Sonnet 5 | Attractive $2/$10 input/output pricing, but no matching current coding-agent row and a lower broad Intelligence score than Terra and Grok. Reconsider after a harness-local A/B test. |
 | Kimi K2.7 Code | Copilot pricing is attractive, but Artificial Analysis currently shows Kimi K3 agent evidence, not evidence for the exact K2.7 Code route. Do not transfer the score across models. |
 | Gemini 3.6 Flash | Very fast and inexpensive, but its broad Intelligence score trails the selected quality routes and there is no matching top coding-agent result. |
