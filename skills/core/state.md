@@ -30,7 +30,8 @@ full board.
 ```
 
 Notes include worktree, branch, `based-on:`, `fixed:`, issue, model and effort,
-`round:` (maximum five), native worker/thread ID, verify result, and commit SHA.
+`round:` (maximum five), native worker/thread ID, verify result, and commit SHA. A
+named route also records `overrideReason` and `overrideFromWorkerId` when applicable.
 When an architect writes a slice, also record it as the current
 `architecture-owner: <worker ID>` and retain it across review rounds. A resumed owner
 keeps that ID; each execution still increments Workers and each result increments

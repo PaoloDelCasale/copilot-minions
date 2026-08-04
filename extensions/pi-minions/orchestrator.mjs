@@ -18,6 +18,14 @@ const MAX_TRIAGED_RESULTS = 30;
 const MAX_WORKER_LAUNCHES = 30;
 const BUDGET_CLASSES = new Set(["normal", "closure"]);
 const CLOSURE_ROLES = new Set(["mechanical", "implementer", "architect", "reviewer"]);
+const MECHANICAL_JUDGMENT_REASONS = new Set(["merge-conflict", "github-judgment"]);
+const ESCALATION_REASONS = new Set([
+  "worker-failure",
+  "verification-failure",
+  "blocked",
+  "review-changes-required",
+  "mediocre-result",
+]);
 const WRITER_ROLES = new Set(["implementer", "architect"]);
 const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
@@ -373,6 +381,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       model: worker.model,
       thinking: worker.thinking,
       routeOverride: worker.routeOverride,
+      overrideReason: worker.overrideReason,
+      overrideFromWorkerId: worker.overrideFromWorkerId,
       status: worker.status,
       startedAt: worker.startedAt,
       completedAt: worker.completedAt,
@@ -545,10 +555,67 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return info;
   }
 
+  function escalationEvidenceMatches(worker, reason) {
+    const evidence = [worker.status, worker.output, worker.error, worker.progress]
+      .filter(Boolean)
+      .join("\n");
+    if (reason === "worker-failure") return worker.status === "failed";
+    if (reason === "verification-failure") {
+      return /(?:verify|verification|test|lint|build|gate)[^\n]{0,120}(?:fail|blocked)|(?:fail|blocked)[^\n]{0,120}(?:verify|verification|test|lint|build|gate)/i.test(evidence);
+    }
+    if (reason === "blocked") return worker.status === "failed" || /STATUS:\s*BLOCKED\b/i.test(evidence);
+    if (reason === "review-changes-required") return /STATUS:\s*REVIEW_CHANGES_REQUIRED\b/i.test(evidence);
+    if (reason === "mediocre-result") return /STATUS:\s*DONE_WITH_CONCERNS\b/i.test(evidence);
+    return false;
+  }
+
+  function validateRouteOverride(spec) {
+    const override = spec.routeOverride;
+    if (!override) {
+      if (spec.overrideReason || spec.overrideFromWorkerId) {
+        throw new Error("Override evidence fields require routeOverride; omit all override fields for normal role routing.");
+      }
+      return;
+    }
+    if (override === "mechanical-judgment") {
+      if (spec.role !== "mechanical") {
+        throw new Error("mechanical-judgment is valid only for the mechanical role.");
+      }
+      if (!MECHANICAL_JUDGMENT_REASONS.has(spec.overrideReason)) {
+        throw new Error("mechanical-judgment requires overrideReason merge-conflict or github-judgment.");
+      }
+      if (spec.overrideFromWorkerId) {
+        throw new Error("mechanical-judgment must not set overrideFromWorkerId.");
+      }
+      return;
+    }
+    if (!override.startsWith("escalate-")) {
+      throw new Error(`Unknown route override: ${override}`);
+    }
+    if (!ESCALATION_REASONS.has(spec.overrideReason)) {
+      throw new Error(`${override} requires a failure-class overrideReason.`);
+    }
+    if (!spec.overrideFromWorkerId) {
+      throw new Error(`${override} requires overrideFromWorkerId referencing the prior adverse result.`);
+    }
+    const worker = run.workers.get(spec.overrideFromWorkerId);
+    if (!worker) throw new Error(`Escalation evidence worker not found: ${spec.overrideFromWorkerId}`);
+    if (activeStatus(worker.status)) {
+      throw new Error(`Escalation evidence worker ${worker.id} is still ${worker.status}.`);
+    }
+    if ((worker.triagedRunIds?.size ?? 0) === 0) {
+      throw new Error(`Escalation evidence worker ${worker.id} has not been triaged.`);
+    }
+    if (!escalationEvidenceMatches(worker, spec.overrideReason)) {
+      throw new Error(`Worker ${worker.id} does not contain ${spec.overrideReason} evidence for ${override}.`);
+    }
+  }
+
   function resolveWorkerRoute(spec, ctx) {
     const matrix = PROVIDER_MATRICES[run.provider]?.[run.variant];
     const roleRoute = matrix?.routes[spec.role];
     if (!roleRoute) throw new Error(`Unknown worker role: ${spec.role}`);
+    validateRouteOverride(spec);
     const budgetClass = spec.budgetClass ?? "normal";
     if (!BUDGET_CLASSES.has(budgetClass)) throw new Error(`Unknown worker budget class: ${budgetClass}`);
     if (budgetClass === "closure" && !CLOSURE_ROLES.has(spec.role)) {
@@ -627,6 +694,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       model: route.modelId,
       thinking: route.thinking,
       routeOverride: task.routeOverride,
+      overrideReason: task.overrideReason,
+      overrideFromWorkerId: task.overrideFromWorkerId,
       displayNumber: run.nextWorkerNumber++,
       status: "in-flight",
       startedAt: now(),

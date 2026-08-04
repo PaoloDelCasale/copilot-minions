@@ -18,6 +18,18 @@ const BudgetClass = StringEnum(["normal", "closure"] as const, {
   default: "normal",
 });
 
+const OverrideReason = StringEnum([
+  "merge-conflict",
+  "github-judgment",
+  "worker-failure",
+  "verification-failure",
+  "blocked",
+  "review-changes-required",
+  "mediocre-result",
+] as const, {
+  description: "Mandatory structured evidence category for a named route override; omit with normal role routing.",
+});
+
 export const schemas = {
   start: Type.Object({
     variant: StringEnum(["standard", "lb"] as const, {
@@ -43,7 +55,13 @@ export const schemas = {
         "escalate-sol-medium",
         "escalate-sol-high",
         "escalate-sol-max",
-      ] as const, { description: "Named route from the documented judgment or escalation ladder." })),
+      ] as const, {
+        description: "Exceptional named route only. Omit for normal dispatch; overrideReason is mandatory, and escalation also requires overrideFromWorkerId.",
+      })),
+      overrideReason: Type.Optional(OverrideReason),
+      overrideFromWorkerId: Type.Optional(Type.String({
+        description: "Terminal, triaged worker whose recorded result justifies an escalation override. Omit for normal routing and mechanical judgment.",
+      })),
       modelOverride: Type.Optional(Type.String({
         description: "Model ID only; omit this key entirely unless the user explicitly requested an override. Never pass an empty string.",
       })),

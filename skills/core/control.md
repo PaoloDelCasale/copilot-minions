@@ -48,6 +48,24 @@ Spawn a task only when every applicable check passes:
 If a check fails, do not spawn. Update the board, ask one user question when needed,
 or prepare a handoff.
 
+### Named route evidence
+
+Normal dispatch omits `routeOverride`, `overrideReason`, and
+`overrideFromWorkerId`; the runtime applies the role matrix. Named overrides fail
+closed unless their structured evidence is valid:
+
+- `mechanical-judgment` requires role `mechanical`, an `overrideReason` of
+  `merge-conflict` or `github-judgment`, and no source worker;
+- every `escalate-*` route requires a failure-class `overrideReason` plus
+  `overrideFromWorkerId` naming a terminal, already-triaged worker whose recorded
+  result proves that exact failure, verification failure, `BLOCKED`,
+  `REVIEW_CHANGES_REQUIRED`, or `DONE_WITH_CONCERNS` condition;
+- initial discovery, implementation, review, setup, and gates always use their normal
+  role routes. Complexity alone is not escalation evidence.
+
+A user-requested model is separate: use `modelOverride` only when the user explicitly
+names the model, and omit it otherwise.
+
 ## Counters
 
 - Increment `Workers` once for each worker launched.
