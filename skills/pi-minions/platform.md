@@ -12,10 +12,12 @@ Paseo owns their persistence, activity, usage, stop, follow-up, and notification
 Every child remains in the caller's existing Paseo Workspace. Never create a Paseo
 Workspace for a Minions worker.
 
-Never pass a provider. Pass `modelOverride` only when the user explicitly requested a
-model. Use the documented `routeOverride` values for mechanical judgment and the
-escalation ladder. After spawning background work, end the turn immediately and do
-not poll `minions_read`. After a completion notification, read the worker result,
+Never pass a provider. Normal dispatch omits `modelOverride`, `routeOverride`,
+`overrideReason`, and `overrideFromWorkerId`. Pass `modelOverride` only when the user
+explicitly requested a model. A named route must carry the structured judgment or
+prior-worker evidence required by [`control.md`](control.md); complexity alone never
+qualifies. After spawning background work, end the turn immediately and do not poll
+`minions_read`. After a completion notification, read the worker result,
 update the board, and dispatch newly unblocked work. Never exceed six in-flight workers.
 The extension also enforces thirty launches. After eight triaged results it accepts
 only already-boarded closure work whose spawn sets `budgetClass: "closure"`; after
@@ -37,8 +39,7 @@ adapter with generic `subagent`, MCP `create_agent`, `send_agent_prompt`, or
 passed as `cwd` is write isolation inside the existing Paseo Workspace, not a request
 to create another Workspace. Paseo does not yet expose a provider-persistent child
 deadline through this adapter, so omit `timeoutSeconds` for Paseo-managed workers and
-use `maxDurationSeconds` for
-the Minions watchdog. The runtime defensively maps an accidental Paseo
-`timeoutSeconds` value to the stricter watchdog duration instead of forwarding an
-unsupported child deadline. Omit `modelOverride` entirely unless the user explicitly
+use `maxDurationSeconds` for the Minions watchdog. The runtime defensively maps an
+accidental Paseo `timeoutSeconds` value to the stricter watchdog duration instead of
+forwarding an unsupported child deadline. Omit `modelOverride` entirely unless the user explicitly
 requested one; never pass an empty string.

@@ -55,6 +55,7 @@ rather than substituting another model.
 Every spawn pins provider, model, and effort. A user-requested model may override the
 model for that batch only; it must exist under the captured provider.
 
-`mechanical-judgment` is valid only for a mechanical merge-conflict or GitHub
-judgment task. Escalation overrides require a recorded mediocre result,
-verification failure, or `BLOCKED`; never use them as a general quality upgrade.
+Normal dispatch omits every override field. `mechanical-judgment` requires a
+mechanical merge-conflict or GitHub judgment reason. Every escalation requires a
+failure-class reason and the ID of a terminal, triaged worker whose recorded result
+proves it; complexity alone is never an escalation.

@@ -299,6 +299,18 @@ test("the extension registers TypeBox schemas for every public Minions tool", ()
   }), true);
   assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
     tasks: [{
+      role: "implementer",
+      task: "Retry verified failure",
+      routeOverride: "escalate-entry",
+      overrideReason: "verification-failure",
+      overrideFromWorkerId: "worker-1",
+    }],
+  }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
+    tasks: [{ role: "implementer", task: "Invalid evidence", overrideReason: "made-up" }],
+  }), false);
+  assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
+    tasks: [{
       role: "reviewer",
       task: "Final review",
       budgetClass: "closure",
@@ -560,30 +572,63 @@ test("Copilot Opus architects receive the explicit quality-route watchdog budget
 test("named escalation routes retain their provider-specific model and effort", async () => {
   const codex = createHarness();
   await start(codex);
+  const codexPrior = await spawn(codex, [{ role: "reviewer", task: "Initial review" }]);
+  codex.runtime.complete(codexPrior.details.workers[0].subagentRunId, {
+    summary: "STATUS: DONE_WITH_CONCERNS\nVerification was incomplete.",
+  });
+  await execute(codex.tools.get("minions_read"), {}, codex.ctx);
   await spawn(codex, [{
     role: "implementer",
     task: "Retry",
     cwd: "/repo/.worktrees/retry-codex",
     routeOverride: "escalate-sol-max",
+    overrideReason: "mediocre-result",
+    overrideFromWorkerId: codexPrior.details.workers[0].id,
   }]);
-  assert.equal(codex.runtime.byMethod("spawn")[0].params.model, "openai-codex/gpt-5.6-sol:max");
+  assert.equal(codex.runtime.byMethod("spawn").at(-1).params.model, "openai-codex/gpt-5.6-sol:max");
 
   const copilot = createHarness({ provider: "github-copilot" });
   await start(copilot);
+  const copilotPrior = await spawn(copilot, [{ role: "explorer", task: "Initial discovery" }]);
+  copilot.runtime.complete(copilotPrior.details.workers[0].subagentRunId, {
+    success: false,
+    state: "failed",
+    summary: "STATUS: BLOCKED\nRepository discovery failed.",
+  });
+  await execute(copilot.tools.get("minions_read"), {}, copilot.ctx);
   await spawn(copilot, [{
     role: "mechanical",
-    task: "Resolve conflict",
+    task: "Resolve merge conflict",
     routeOverride: "mechanical-judgment",
+    overrideReason: "merge-conflict",
   }, {
     role: "implementer",
     task: "Escalated retry",
     cwd: "/repo/.worktrees/retry-copilot",
     routeOverride: "escalate-entry",
+    overrideReason: "blocked",
+    overrideFromWorkerId: copilotPrior.details.workers[0].id,
   }]);
   assert.deepEqual(
-    copilot.runtime.byMethod("spawn").map((call) => call.params.model),
+    copilot.runtime.byMethod("spawn").slice(-2).map((call) => call.params.model),
     ["github-copilot/gpt-5.6-terra:max", "github-copilot/gpt-5.6-sol:high"],
   );
+});
+
+test("named route overrides fail closed without structured evidence", async () => {
+  const harness = createHarness({ provider: "github-copilot" });
+  await start(harness);
+  await assert.rejects(spawn(harness, [{
+    role: "explorer",
+    task: "Initial discovery must use the role route",
+    routeOverride: "escalate-entry",
+  }]), /requires a failure-class overrideReason/);
+  await assert.rejects(spawn(harness, [{
+    role: "mechanical",
+    task: "Create a worktree",
+    routeOverride: "mechanical-judgment",
+  }]), /requires overrideReason merge-conflict or github-judgment/);
+  assert.equal(harness.runtime.byMethod("spawn").length, 0);
 });
 
 test("the wrapper enforces six concurrent workers", async () => {
@@ -1075,10 +1120,9 @@ test("model-aware watchdog stops expensive Sol workers and blocks over-budget ru
   } });
   await start(harness);
   const spawned = await spawn(harness, [{
-    role: "implementer",
+    role: "architect",
     task: "Complex Sol fix",
     cwd: "/repo/.worktrees/sol",
-    routeOverride: "escalate-sol-high",
   }]);
   const worker = spawned.details.workers[0];
   assert.equal(worker.maxCostUsd, 15);
@@ -1130,6 +1174,7 @@ test("blank model overrides fall back and Paseo deadlines use the watchdog", asy
     role: "mechanical",
     task: "Inspect issue",
     routeOverride: "mechanical-judgment",
+    overrideReason: "github-judgment",
     modelOverride: "   ",
     timeoutSeconds: 900,
     maxDurationSeconds: 1800,
