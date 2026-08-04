@@ -45,6 +45,9 @@ finish notifications. Reloaded Minions sessions retain both board and native-age
 identity. Ordinary Pi behavior remains on `pi-subagents`.
 
 Paseo 0.2.5 does not expose a persistent deadline on `create_agent`; the adapter
-therefore rejects `timeoutSeconds` rather than silently weakening that contract.
-Authenticated release validation must cover child visibility, status/activity
-projection, exact-once usage, cancellation, notification, reload, and follow-up.
+therefore never forwards `timeoutSeconds`. Because tool clients can materialize
+optional fields despite prompt instructions, an accidental value is retained only as
+audit metadata, is reported in the spawn result, and does not shorten the model-aware
+`maxDurationSeconds` watchdog. Authenticated release validation must cover child
+visibility, status/activity projection, exact-once usage, cancellation, notification,
+reload, follow-up, and this deadline normalization.
