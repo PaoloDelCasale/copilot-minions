@@ -44,11 +44,13 @@ export const schemas = {
         "escalate-sol-high",
         "escalate-sol-max",
       ] as const, { description: "Named route from the documented judgment or escalation ladder." })),
-      modelOverride: Type.Optional(Type.String({ description: "Model ID only; use exclusively for an explicit user override." })),
+      modelOverride: Type.Optional(Type.String({
+        description: "Model ID only; omit this key entirely unless the user explicitly requested an override. Never pass an empty string.",
+      })),
       timeoutSeconds: Type.Optional(Type.Integer({
         minimum: 1,
         maximum: 3600,
-        description: "Optional hard worker deadline in seconds.",
+        description: "Optional hard worker deadline in seconds. Omit on Paseo; use maxDurationSeconds for its watchdog.",
       })),
       maxCostUsd: Type.Optional(Type.Number({
         exclusiveMinimum: 0,
