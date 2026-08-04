@@ -648,20 +648,78 @@ test("Copilot low-budget judgment and first escalation use Luna then Grok", asyn
   );
 });
 
-test("named route overrides fail closed without structured evidence", async () => {
+test("invalid named route overrides are audited and downgraded to role routes", async () => {
   const harness = createHarness({ provider: "github-copilot" });
   await start(harness);
-  await assert.rejects(spawn(harness, [{
+  const explorer = await spawn(harness, [{
     role: "explorer",
     task: "Initial discovery must use the role route",
     routeOverride: "escalate-entry",
-  }]), /requires a failure-class overrideReason/);
-  await assert.rejects(spawn(harness, [{
+  }]);
+  const mechanical = await spawn(harness, [{
     role: "mechanical",
     task: "Create a worktree",
     routeOverride: "mechanical-judgment",
-  }]), /requires overrideReason merge-conflict or github-judgment/);
-  assert.equal(harness.runtime.byMethod("spawn").length, 0);
+  }]);
+
+  assert.deepEqual(
+    harness.runtime.byMethod("spawn").map((call) => call.params.model),
+    ["github-copilot/claude-opus-5:high", "github-copilot/gpt-5.6-luna:high"],
+  );
+  assert.match(explorer.content[0].text, /Ignored 1 invalid route override/);
+  assert.equal(explorer.details.workers[0].requestedRouteOverride, "escalate-entry");
+  assert.equal(explorer.details.workers[0].routeOverride, undefined);
+  assert.match(explorer.details.workers[0].routeOverrideRejection, /failure-class overrideReason/);
+  assert.equal(mechanical.details.workers[0].requestedRouteOverride, "mechanical-judgment");
+  assert.equal(mechanical.details.workers[0].routeOverride, undefined);
+  assert.match(mechanical.details.workers[0].routeOverrideRejection, /requires overrideReason/);
+});
+
+test("Copilot LB preserves roles when a frontier repeats invalid judgment fields", async () => {
+  const harness = createHarness({ provider: "github-copilot" });
+  await start(harness, "lb");
+  const result = await spawn(harness, [{
+    role: "explorer",
+    task: "Map repository seams",
+    routeOverride: "mechanical-judgment",
+    overrideReason: "github-judgment",
+    overrideFromWorkerId: "",
+    modelOverride: "",
+    timeoutSeconds: 3600,
+    maxDurationSeconds: 1800,
+  }, {
+    role: "implementer",
+    task: "Implement the bounded slice",
+    cwd: "/repo/.worktrees/lb-implementer",
+    routeOverride: "mechanical-judgment",
+    overrideReason: "github-judgment",
+    overrideFromWorkerId: "",
+    modelOverride: "",
+    timeoutSeconds: 3600,
+    maxDurationSeconds: 3600,
+  }, {
+    role: "reviewer",
+    task: "Review the fixed-point diff",
+    routeOverride: "mechanical-judgment",
+    overrideReason: "github-judgment",
+    overrideFromWorkerId: "",
+    modelOverride: "",
+    timeoutSeconds: 3600,
+    maxDurationSeconds: 2400,
+  }]);
+
+  assert.deepEqual(
+    harness.runtime.byMethod("spawn").map((call) => call.params.model),
+    [
+      "github-copilot/gpt-5.6-luna:max",
+      "github-copilot/gpt-5.6-luna:max",
+      "github-copilot/gpt-5.6-sol:low",
+    ],
+  );
+  assert.deepEqual(result.details.workers.map((worker) => worker.role), ["explorer", "implementer", "reviewer"]);
+  assert.equal(result.details.workers.every((worker) => worker.routeOverride === undefined), true);
+  assert.equal(result.details.workers.every((worker) => /mechanical role/.test(worker.routeOverrideRejection)), true);
+  assert.match(result.content[0].text, /Ignored 3 invalid route override/);
 });
 
 test("the wrapper enforces six concurrent workers", async () => {

@@ -380,9 +380,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       provider: worker.provider,
       model: worker.model,
       thinking: worker.thinking,
+      requestedRouteOverride: worker.requestedRouteOverride,
       routeOverride: worker.routeOverride,
       overrideReason: worker.overrideReason,
       overrideFromWorkerId: worker.overrideFromWorkerId,
+      routeOverrideRejection: worker.routeOverrideRejection,
       status: worker.status,
       startedAt: worker.startedAt,
       completedAt: worker.completedAt,
@@ -569,60 +571,56 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return false;
   }
 
-  function validateRouteOverride(spec) {
+  function routeOverrideRejection(spec) {
     const override = spec.routeOverride;
     if (!override) {
-      if (spec.overrideReason || spec.overrideFromWorkerId) {
-        throw new Error("Override evidence fields require routeOverride; omit all override fields for normal role routing.");
-      }
-      return;
+      return spec.overrideReason || spec.overrideFromWorkerId
+        ? "override evidence was supplied without routeOverride"
+        : undefined;
     }
     if (override === "mechanical-judgment") {
-      if (spec.role !== "mechanical") {
-        throw new Error("mechanical-judgment is valid only for the mechanical role.");
-      }
+      if (spec.role !== "mechanical") return "mechanical-judgment is valid only for the mechanical role";
       if (!MECHANICAL_JUDGMENT_REASONS.has(spec.overrideReason)) {
-        throw new Error("mechanical-judgment requires overrideReason merge-conflict or github-judgment.");
+        return "mechanical-judgment requires overrideReason merge-conflict or github-judgment";
       }
-      if (spec.overrideFromWorkerId) {
-        throw new Error("mechanical-judgment must not set overrideFromWorkerId.");
-      }
-      return;
+      if (spec.overrideFromWorkerId) return "mechanical-judgment must not set overrideFromWorkerId";
+      return undefined;
     }
-    if (!override.startsWith("escalate-")) {
-      throw new Error(`Unknown route override: ${override}`);
-    }
+    if (!override.startsWith("escalate-")) return `unknown route override ${override}`;
     if (!ESCALATION_REASONS.has(spec.overrideReason)) {
-      throw new Error(`${override} requires a failure-class overrideReason.`);
+      return `${override} requires a failure-class overrideReason`;
     }
     if (!spec.overrideFromWorkerId) {
-      throw new Error(`${override} requires overrideFromWorkerId referencing the prior adverse result.`);
+      return `${override} requires overrideFromWorkerId referencing the prior adverse result`;
     }
     const worker = run.workers.get(spec.overrideFromWorkerId);
-    if (!worker) throw new Error(`Escalation evidence worker not found: ${spec.overrideFromWorkerId}`);
-    if (activeStatus(worker.status)) {
-      throw new Error(`Escalation evidence worker ${worker.id} is still ${worker.status}.`);
-    }
+    if (!worker) return `escalation evidence worker not found: ${spec.overrideFromWorkerId}`;
+    if (activeStatus(worker.status)) return `escalation evidence worker ${worker.id} is still ${worker.status}`;
     if ((worker.triagedRunIds?.size ?? 0) === 0) {
-      throw new Error(`Escalation evidence worker ${worker.id} has not been triaged.`);
+      return `escalation evidence worker ${worker.id} has not been triaged`;
     }
     if (!escalationEvidenceMatches(worker, spec.overrideReason)) {
-      throw new Error(`Worker ${worker.id} does not contain ${spec.overrideReason} evidence for ${override}.`);
+      return `worker ${worker.id} does not contain ${spec.overrideReason} evidence for ${override}`;
     }
+    return undefined;
   }
 
   function resolveWorkerRoute(spec, ctx) {
     const matrix = PROVIDER_MATRICES[run.provider]?.[run.variant];
     const roleRoute = matrix?.routes[spec.role];
     if (!roleRoute) throw new Error(`Unknown worker role: ${spec.role}`);
-    validateRouteOverride(spec);
+    let rejection = routeOverrideRejection(spec);
+    let appliedRouteOverride = rejection ? undefined : spec.routeOverride;
+    if (appliedRouteOverride && !matrix.overrides[appliedRouteOverride]) {
+      rejection = `route override ${appliedRouteOverride} is unavailable for ${run.variant}`;
+      appliedRouteOverride = undefined;
+    }
     const budgetClass = spec.budgetClass ?? "normal";
     if (!BUDGET_CLASSES.has(budgetClass)) throw new Error(`Unknown worker budget class: ${budgetClass}`);
     if (budgetClass === "closure" && !CLOSURE_ROLES.has(spec.role)) {
       throw new Error(`The closure budget class is unavailable for role ${spec.role}.`);
     }
-    const route = spec.routeOverride ? matrix.overrides[spec.routeOverride] : roleRoute;
-    if (!route) throw new Error(`Route override ${spec.routeOverride} is not available for ${run.variant}.`);
+    const route = appliedRouteOverride ? matrix.overrides[appliedRouteOverride] : roleRoute;
     const [defaultModel, thinking] = route;
     const requestedModel = typeof spec.modelOverride === "string" ? spec.modelOverride.trim() : "";
     const modelId = requestedModel || defaultModel;
@@ -654,6 +652,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       maxDurationSeconds,
       agent: ROLE_AGENTS[spec.role],
       budgetClass,
+      requestedRouteOverride: spec.routeOverride,
+      routeOverride: appliedRouteOverride,
+      routeOverrideRejection: rejection,
       discipline,
       disciplineLoaded,
     };
@@ -693,9 +694,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       provider: run.provider,
       model: route.modelId,
       thinking: route.thinking,
-      routeOverride: task.routeOverride,
-      overrideReason: task.overrideReason,
-      overrideFromWorkerId: task.overrideFromWorkerId,
+      requestedRouteOverride: route.requestedRouteOverride,
+      routeOverride: route.routeOverride,
+      overrideReason: route.routeOverride ? task.overrideReason : undefined,
+      overrideFromWorkerId: route.routeOverride ? task.overrideFromWorkerId : undefined,
+      routeOverrideRejection: route.routeOverrideRejection,
       displayNumber: run.nextWorkerNumber++,
       status: "in-flight",
       startedAt: now(),
@@ -1080,8 +1083,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const workers = launched.map(({ result, index }) => registerSpawnedWorker(result.value, tasks[index], routes[index], ctx));
       run.launchCount += workers.length;
       persistRun();
+      const rejectedOverrides = workers.filter((worker) => worker.routeOverrideRejection);
+      const routingNotice = rejectedOverrides.length > 0
+        ? ` Ignored ${rejectedOverrides.length} invalid route override(s) and used the normal role matrix.`
+        : "";
       return textResult(
-        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}. End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
+        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routingNotice} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
         { workers: workers.map(workerSnapshot) },
       );
     },

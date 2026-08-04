@@ -16,7 +16,9 @@ Never pass a provider. Normal dispatch omits `modelOverride`, `routeOverride`,
 `overrideReason`, and `overrideFromWorkerId`. Pass `modelOverride` only when the user
 explicitly requested a model. A named route must carry the structured judgment or
 prior-worker evidence required by [`control.md`](control.md); complexity alone never
-qualifies. After spawning background work, end the turn immediately and do not poll
+qualifies. Invalid named overrides are audited and downgraded to the normal role route
+so a frontier cannot evade routing by changing worker roles after a rejected spawn.
+After spawning background work, end the turn immediately and do not poll
 `minions_read`. After a completion notification, read the worker result,
 update the board, and dispatch newly unblocked work. Never exceed six in-flight workers.
 The extension also enforces thirty launches. After eight triaged results it accepts
@@ -41,5 +43,5 @@ to create another Workspace. Paseo does not yet expose a provider-persistent chi
 deadline through this adapter, so omit `timeoutSeconds` for Paseo-managed workers and
 use `maxDurationSeconds` for the Minions watchdog. The runtime defensively maps an
 accidental Paseo `timeoutSeconds` value to the stricter watchdog duration instead of
-forwarding an unsupported child deadline. Omit `modelOverride` entirely unless the user explicitly
-requested one; never pass an empty string.
+forwarding an unsupported child deadline. Omit `modelOverride` entirely unless the
+user explicitly requested one; never pass an empty string.

@@ -51,8 +51,8 @@ or prepare a handoff.
 ### Named route evidence
 
 Normal dispatch omits `routeOverride`, `overrideReason`, and
-`overrideFromWorkerId`; the runtime applies the role matrix. Named overrides fail
-closed unless their structured evidence is valid:
+`overrideFromWorkerId`; the runtime applies the role matrix. A named override is
+applied only when its structured evidence is valid:
 
 - `mechanical-judgment` requires role `mechanical`, an `overrideReason` of
   `merge-conflict` or `github-judgment`, and no source worker;
@@ -63,7 +63,10 @@ closed unless their structured evidence is valid:
 - initial discovery, implementation, review, setup, and gates always use their normal
   role routes. Complexity alone is not escalation evidence.
 
-A user-requested model is separate: use `modelOverride` only when the user explicitly
+An invalid named override is recorded on the worker and downgraded to the normal role
+route instead of failing the spawn. This preserves the requested semantic role and
+prevents retry loops from converting implementers or reviewers into mechanical
+workers. A user-requested model is separate: use `modelOverride` only when the user explicitly
 names the model, and omit it otherwise.
 
 ## Counters
