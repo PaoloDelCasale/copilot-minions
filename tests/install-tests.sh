@@ -56,6 +56,8 @@ if [[ "${1:-}" == "--list-models" ]]; then
     'openai-codex gpt-5.6-sol' \
     'openai-codex gpt-5.6-terra' \
     'openai-codex gpt-5.6-luna' \
+    'github-copilot claude-opus-5' \
+    'github-copilot gpt-5.6-luna' \
     'github-copilot gpt-5.6-sol' \
     'github-copilot gpt-5.6-terra'
   case "${MINIONS_TEST_PI_MODELS:-complete}" in
@@ -179,7 +181,9 @@ grep -Fxq 'npm:pi-mcp-adapter@2.16.0' "${MINIONS_TEST_PI_INSTALL_LOG}"
 ! grep -Fq 'pi-subagents' "${MINIONS_TEST_PI_INSTALL_LOG}"
 [[ -f "${COPILOT_SKILL}/platform.md" ]]
 [[ -f "${CODEX_SKILL}/platform.md" ]]
-grep -Eq 'mechanical.*grok-4\.5.*high' "${COPILOT_SKILL}/models.md"
+grep -Eq 'mechanical.*gpt-5\.6-luna.*high' "${COPILOT_SKILL}/models.md"
+grep -Eq 'explorer.*claude-opus-5.*high' "${COPILOT_SKILL}/models.md"
+grep -Eq 'architect.*claude-opus-5.*xhigh' "${COPILOT_SKILL}/models.md"
 grep -Eq 'mechanical.*gpt-5\.6-luna.*low' "${CODEX_SKILL}/models.md"
 grep -Fq '## `openai-codex`' "${PI_SKILL}/models.md"
 grep -Fq '## `github-copilot`' "${PI_SKILL}/models.md"

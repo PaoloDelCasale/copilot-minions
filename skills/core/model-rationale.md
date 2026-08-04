@@ -2,18 +2,21 @@
 
 Routing differs by provider. OpenAI Codex retains Luna for bounded daily work, Sol
 for complex implementation, review, and escalation, and Terra for structured
-planning. GitHub Copilot uses Grok 4.5 at high reasoning for every route that would
-otherwise use Luna; its Sol and Terra decisions remain unchanged.
+planning. GitHub Copilot's standard profile is a quality-first portfolio selected
+from its broader catalog; its low-budget profile remains unchanged.
 
-| Route kind | OpenAI Codex | GitHub Copilot | Rationale |
-|------------|--------------|----------------|-----------|
-| Frontier | Sol medium | Sol medium | Strong decomposition without high effort every turn |
-| Mechanical | Luna low | Grok high | Provider-specific execution route |
-| Explorer | Luna medium/high | Grok high | Read-heavy discovery |
-| Implementer | Luna high/xhigh | Grok high | Tightly specified slices |
-| Architect (standard) | Sol medium | Sol medium | Ambiguous cross-cutting work |
-| Reviewer | Sol low | Sol low | Independent judgment |
-| Planner (standard) | Terra high | Terra high | Structured synthesis at low volume |
+| Route kind | OpenAI Codex | GitHub Copilot standard | Rationale |
+|------------|--------------|-------------------------|-----------|
+| Frontier | Sol medium | Sol medium | Strong decomposition without paying max effort every turn |
+| Mechanical | Luna low | Luna high | Cheap bounded execution; high effort protects command accuracy |
+| Explorer | Luna high | Opus 5 high | Quality-first repository understanding; xhigh remains reserved for architecture |
+| Implementer | Luna xhigh | Terra max | Terra max is close to Sol on DeepSWE at materially lower token prices |
+| Architect | Sol medium | Opus 5 xhigh | Highest-quality low-volume architecture route |
+| Reviewer | Sol low | Sol high | Independent family from the architect and a stronger correctness gate |
+| Planner | Terra high | Terra max | Structured synthesis with a quality-first effort setting |
 
-These are routing decisions, not benchmark claims. Required-model checks resolve all
-IDs against the selected provider's own catalog and never fall back across providers.
+The Copilot matrix and its pricing snapshot are supported by the repository's
+[research note](https://github.com/PaoloDelCasale/copilot-minions/blob/main/docs/research/copilot-standard-model-routing.md).
+Benchmarks are selection evidence, not guarantees for the Pi or native Copilot harness. Required-model checks resolve
+all IDs against the selected provider's own catalog and never fall back across
+providers.

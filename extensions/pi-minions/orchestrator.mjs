@@ -23,6 +23,7 @@ const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
 const DEFAULT_RUN_COST_CEILING_USD = 40;
 const MODEL_BUDGETS = {
+  "claude-opus-5": { warningCostUsd: 10, maxCostUsd: 15, maxDurationSeconds: 50 * 60 },
   "gpt-5.6-luna": { warningCostUsd: 4, maxCostUsd: 6, maxDurationSeconds: 30 * 60 },
   "gpt-5.6-sol": { warningCostUsd: 10, maxCostUsd: 15, maxDurationSeconds: 45 * 60 },
   "gpt-5.6-terra": { warningCostUsd: 6, maxCostUsd: 10, maxDurationSeconds: 35 * 60 },
@@ -90,18 +91,23 @@ const PROVIDER_MATRICES = {
   },
   "github-copilot": {
     standard: {
-      requiredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "grok-4.5"],
+      requiredModels: [
+        "claude-opus-5",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+      ],
       routes: {
-        mechanical: ["grok-4.5", "high"],
-        explorer: ["grok-4.5", "high"],
-        implementer: ["grok-4.5", "high"],
-        architect: ["gpt-5.6-sol", "medium"],
-        reviewer: ["gpt-5.6-sol", "low"],
-        planner: ["gpt-5.6-terra", "high"],
+        mechanical: ["gpt-5.6-luna", "high"],
+        explorer: ["claude-opus-5", "high"],
+        implementer: ["gpt-5.6-terra", "max"],
+        architect: ["claude-opus-5", "xhigh"],
+        reviewer: ["gpt-5.6-sol", "high"],
+        planner: ["gpt-5.6-terra", "max"],
       },
       overrides: {
-        "mechanical-judgment": ["gpt-5.6-sol", "low"],
-        "escalate-entry": ["gpt-5.6-sol", "medium"],
+        "mechanical-judgment": ["gpt-5.6-terra", "max"],
+        "escalate-entry": ["gpt-5.6-sol", "high"],
         "escalate-sol-medium": ["gpt-5.6-sol", "medium"],
         "escalate-sol-high": ["gpt-5.6-sol", "high"],
         "escalate-sol-max": ["gpt-5.6-sol", "max"],

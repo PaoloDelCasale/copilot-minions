@@ -242,18 +242,23 @@ Routing is provider-specific. OpenAI Codex (native and Pi) keeps its existing ro
 | Reviewer | `gpt-5.6-sol` | low |
 | Planner | `gpt-5.6-terra` | high |
 
-GitHub Copilot (native and Pi) uses Grok high wherever the old route used Luna;
-Sol and Terra routes stay unchanged:
+GitHub Copilot (native and Pi) uses a quality-first, role-specialized portfolio:
 
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| Mechanical / explorer / implementer | `grok-4.5` | high |
-| Architect | `gpt-5.6-sol` | medium |
-| Reviewer | `gpt-5.6-sol` | low |
-| Planner | `gpt-5.6-terra` | high |
+| Mechanical | `gpt-5.6-luna` | high |
+| Explorer | `claude-opus-5` | high |
+| Implementer | `gpt-5.6-terra` | max |
+| Architect | `claude-opus-5` | xhigh |
+| Reviewer | `gpt-5.6-sol` | high |
+| Planner | `gpt-5.6-terra` | max |
 
-See each platform overlay's `models.md` and `skills/core/model-rationale.md`.
+The matrix keeps Sol on orchestration, review, and escalation rather than every task;
+uses Luna for cheap bounded commands, Terra for implementation and planning, and
+Opus high/xhigh for quality-first discovery and low-volume architecture. See each platform
+overlay's `models.md`, `skills/core/model-rationale.md`, and
+`docs/research/copilot-standard-model-routing.md`.
 
 ### Pi provider affinity and Paseo runtime selection
 
@@ -261,9 +266,10 @@ Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
 `<provider>/gpt-5.6-sol:medium`; workers use that provider's matrix while every model
 is qualified with the same provider. Required-model preflight and route lookup are
-provider-specific. At orchestration start, the runtime requires exact catalog
-IDs—including `github-copilot/grok-4.5`—and directs users to upgrade Pi when a route
-is missing; there is no cross-provider or availability fallback. Installation does
+provider-specific. At orchestration start, the runtime requires every exact catalog
+ID in the selected matrix—including the four-model GitHub Copilot standard stack—and
+directs users to upgrade Pi when a route is missing; there is no cross-provider or
+availability fallback. Installation does
 not require those models to be available. Closing the run restores the parent's
 original model and thinking level.
 
@@ -294,8 +300,9 @@ provisional for two minutes so automatic retry or compaction cannot release that
 lease prematurely, and provisional workers remain explicitly stoppable.
 
 Paseo runs also have a live model-aware watchdog. Defaults are Luna `$4` warning / `$6`
-stop / 30 minutes, Sol `$10` / `$15` / 45 minutes, and Terra or Grok `$6` / `$10` /
-35 minutes. The run warns at 75% of its default `$40` ceiling and blocks new dispatch
+stop / 30 minutes, Sol `$10` / `$15` / 45 minutes, Terra or Grok `$6` / `$10` /
+35 minutes, and Opus 5 `$10` / `$15` / 50 minutes. The run warns at 75% of its
+default `$40` ceiling and blocks new dispatch
 at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` allow explicit
 overrides. A watchdog stop retains worker and worktree ownership until Paseo confirms
 the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
