@@ -147,6 +147,49 @@ test("the Orca runtime uses native Run, Task, terminal, and Dispatch lifecycle",
   assert.equal((await runtime.call("release", { id: "dispatch-2" })).state, "released");
 });
 
+test("Orca worker-start waits for delayed agent-hook registration", async () => {
+  const calls = [];
+  const delays = [];
+  let starts = 0;
+  const callOrca = async (args) => {
+    calls.push(args);
+    const command = args.slice(0, 2).join(" ");
+    if (args[0] === "status") return {
+      runtime: { state: "ready", capabilities: ["orchestration.contract.v1"] },
+      graph: { state: "ready" },
+    };
+    if (command === "orchestration run-create") return { run: { id: "run-registration" } };
+    if (command === "worktree show") return { worktree: { id: "repo::C:/repo" } };
+    if (command === "orchestration task-create") return { task: { id: "task-registration" } };
+    if (command === "terminal create") return { terminal: { handle: "term-registration" } };
+    if (command === "terminal wait") return { wait: { satisfied: true } };
+    if (command === "orchestration worker-start") {
+      starts += 1;
+      if (starts < 3) throw new Error("Orca CLI failed (agent_unconfigured): terminal hook pending");
+      return { state: "ready", dispatchId: "dispatch-registration", agentTerminalHandle: "term-registration" };
+    }
+    throw new Error(`Unexpected Orca command: ${args.join(" ")}`);
+  };
+  const runtime = createOrcaRuntime({
+    host,
+    callOrca,
+    readRolePrompt: () => "Role.",
+    workerStartMaxAttempts: 3,
+    workerStartRetryDelayMs: 25,
+    delay: async (ms) => { delays.push(ms); },
+  });
+  await runtime.call("ping");
+  const worker = await runtime.call("spawn", {
+    agent: "pi-minions-mechanical",
+    task: "Inspect",
+    cwd: "C:/repo",
+    model: "github-copilot/gpt-5.6-luna:high",
+  });
+  assert.equal(worker.details.runtimeAgentId, "dispatch-registration");
+  assert.equal(starts, 3);
+  assert.deepEqual(delays, [25, 25]);
+});
+
 test("legacy low-level Orca dispatches reconcile completion and release their exact terminal", async () => {
   const calls = [];
   const callOrca = async (args) => {
@@ -191,6 +234,50 @@ test("legacy low-level Orca dispatches reconcile completion and release their ex
   assert.equal(release.state, "released");
   assert.equal(release.processAction, "legacy-terminal-close");
   assert.equal(calls.some((args) => args.join(" ").includes("terminal close --terminal term-legacy")), true);
+});
+
+test("retained and inactive external Orca workers close without blocking Minions", async () => {
+  const calls = [];
+  let releaseMode = "retained";
+  const callOrca = async (args) => {
+    calls.push(args);
+    const command = args.slice(0, 2).join(" ");
+    if (args[0] === "status") return {
+      runtime: { state: "ready", capabilities: ["orchestration.contract.v1"] },
+      graph: { state: "ready" },
+    };
+    if (command === "orchestration run-create") return { run: { id: "run-release" } };
+    if (command === "orchestration worker-release") {
+      if (releaseMode === "retained") return { state: "retained", reason: "external_terminal" };
+      throw new Error("Orca CLI failed (dispatch_inactive): stopped worker");
+    }
+    if (command === "orchestration worker-show") return {
+      dispatch: { id: "dispatch-release", status: "failed" },
+      task: { status: "failed" },
+      worker: { state: "stopped" },
+    };
+    if (command === "terminal close") return { close: { handle: "term-release" } };
+    throw new Error(`Unexpected Orca command: ${args.join(" ")}`);
+  };
+  const runtime = createOrcaRuntime({ host, callOrca, readRolePrompt: () => "Role." });
+  await runtime.call("ping");
+  const retained = await runtime.call("release", {
+    id: "dispatch-release",
+    taskId: "task-release",
+    terminalId: "term-release",
+  });
+  assert.equal(retained.state, "released");
+  assert.equal(retained.processAction, "external-terminal-close");
+
+  releaseMode = "inactive";
+  const inactive = await runtime.call("release", {
+    id: "dispatch-release",
+    taskId: "task-release",
+    terminalId: "term-release",
+  });
+  assert.equal(inactive.state, "released");
+  assert.equal(inactive.processAction, "inactive-terminal-close");
+  assert.equal(calls.filter((args) => args.slice(0, 2).join(" ") === "terminal close").length, 2);
 });
 
 test("an uncertain Orca worker-start reply is reconciled before any terminal cleanup", async () => {

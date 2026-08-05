@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 const REQUIRED_ORCA_CAPABILITY = "orchestration.contract.v1";
 const DEFAULT_REQUEST_TIMEOUT_MS = 90_000;
 const DEFAULT_READY_TIMEOUT_MS = 60_000;
+const DEFAULT_WORKER_START_MAX_ATTEMPTS = 20;
+const DEFAULT_WORKER_START_RETRY_DELAY_MS = 500;
 const ROLE_PROMPT_DIRECTORY = path.join(path.dirname(fileURLToPath(import.meta.url)), "agents");
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -218,6 +220,9 @@ export function createOrcaRuntime({
   host,
   readRolePrompt = defaultReadRolePrompt,
   readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS,
+  workerStartMaxAttempts = DEFAULT_WORKER_START_MAX_ATTEMPTS,
+  workerStartRetryDelayMs = DEFAULT_WORKER_START_RETRY_DELAY_MS,
+  delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   if (typeof callOrca !== "function") throw new Error("Orca runtime requires a CLI caller.");
   if (!host?.terminalHandle) throw new Error("Orca runtime requires the coordinator terminal identity.");
@@ -234,6 +239,36 @@ export function createOrcaRuntime({
     const taskId = resultId(result, ["task", "id"], ["taskId"]);
     if (!taskId) throw new Error("Orca task-create returned no task id.");
     return taskId;
+  }
+
+  async function startWorker(taskId, terminalId) {
+    let lastError;
+    for (let attempt = 1; attempt <= workerStartMaxAttempts; attempt += 1) {
+      try {
+        return await callOrca([
+          "orchestration", "worker-start",
+          "--task", taskId,
+          "--terminal", terminalId,
+          "--run", activeRunId,
+        ], { timeoutMs: readyTimeoutMs + 10_000 });
+      } catch (error) {
+        lastError = error;
+        if (!hasOrcaErrorCode(error, "agent_unconfigured") || attempt === workerStartMaxAttempts) throw error;
+        await delay(workerStartRetryDelayMs);
+      }
+    }
+    throw lastError ?? new Error(`Orca worker-start exhausted its registration attempts for Task ${taskId}.`);
+  }
+
+  async function closeRecordedTerminal(terminalId) {
+    try {
+      return await callOrca(["terminal", "close", "--terminal", terminalId]);
+    } catch (error) {
+      if (["terminal_gone", "terminal_not_found", "terminal_handle_stale"].some((code) => hasOrcaErrorCode(error, code))) {
+        return { close: { handle: terminalId, alreadyGone: true } };
+      }
+      throw error;
+    }
   }
 
   async function readWorker(dispatchId) {
@@ -342,12 +377,7 @@ export function createOrcaRuntime({
           ], { timeoutMs: readyTimeoutMs + 10_000 });
           if (ready?.wait?.satisfied === false) throw new Error(`Orca Pi worker did not become ready: ${ready.wait.blockedReason ?? ready.wait.status ?? "timeout"}`);
           workerStartAttempted = true;
-          const started = await callOrca([
-            "orchestration", "worker-start",
-            "--task", taskId,
-            "--terminal", terminalId,
-            "--run", activeRunId,
-          ], { timeoutMs: readyTimeoutMs + 10_000 });
+          const started = await startWorker(taskId, terminalId);
           const dispatchId = resultId(started, ["dispatchId"], ["dispatch", "id"]);
           if (started?.state !== "ready" || !dispatchId) {
             throw new Error(started?.lastError ?? "Orca worker-start did not return a ready Dispatch.");
@@ -424,12 +454,7 @@ export function createOrcaRuntime({
         const taskId = await createTask(params, { resumed: true });
         let result;
         try {
-          result = await callOrca([
-            "orchestration", "worker-start",
-            "--task", taskId,
-            "--terminal", params.terminalId,
-            "--run", activeRunId,
-          ], { timeoutMs: readyTimeoutMs + 10_000 });
+          result = await startWorker(taskId, params.terminalId);
         } catch (error) {
           try {
             const recovered = await callOrca(["orchestration", "dispatch-show", "--task", taskId]);
@@ -464,7 +489,7 @@ export function createOrcaRuntime({
           if (!params.taskId || !params.terminalId || !hasOrcaErrorCode(error, "dispatch_not_found")) throw error;
           const legacy = await readLegacyDispatch(params.taskId);
           if (!legacy) throw error;
-          await callOrca(["terminal", "close", "--terminal", params.terminalId]);
+          await closeRecordedTerminal(params.terminalId);
           if (normalizedState(legacy) === "running") {
             await callOrca([
               "orchestration", "task-update",
@@ -487,12 +512,25 @@ export function createOrcaRuntime({
         try {
           result = await callOrca(["orchestration", "worker-release", "--dispatch", params.id]);
         } catch (error) {
-          if (!params.terminalId || !hasOrcaErrorCode(error, "dispatch_not_found")) throw error;
-          const closed = await callOrca(["terminal", "close", "--terminal", params.terminalId]);
-          return { state: "released", processAction: "legacy-terminal-close", closed };
+          if (!params.terminalId) throw error;
+          if (hasOrcaErrorCode(error, "dispatch_not_found")) {
+            const closed = await closeRecordedTerminal(params.terminalId);
+            return { state: "released", processAction: "legacy-terminal-close", closed };
+          }
+          if (hasOrcaErrorCode(error, "dispatch_inactive")) {
+            const show = await showWorker(params);
+            if (normalizedState(show) === "running") throw error;
+            const closed = await closeRecordedTerminal(params.terminalId);
+            return { state: "released", processAction: "inactive-terminal-close", closed };
+          }
+          throw error;
         }
         if (result?.state === "release_unknown") {
           throw new Error(result.lastError ?? result.recovery ?? `Orca could not prove terminal release for worker ${params.id}.`);
+        }
+        if (result?.state === "retained" && params.terminalId) {
+          const closed = await closeRecordedTerminal(params.terminalId);
+          return { state: "released", processAction: "external-terminal-close", release: result, closed };
         }
         return result;
       }
