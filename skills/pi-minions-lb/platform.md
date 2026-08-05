@@ -41,7 +41,8 @@ tools for top-level dispatch. In particular, a linked Git worktree passed as `cw
 write isolation inside the existing Paseo Workspace, not a request to create another
 Workspace. Paseo does not yet expose a provider-persistent child deadline through
 this adapter, so omit `timeoutSeconds` for Paseo-managed workers and use
-`maxDurationSeconds` for the Minions watchdog. The runtime defensively maps an
-accidental Paseo `timeoutSeconds` value to the stricter watchdog duration instead of
-forwarding an unsupported child deadline. Omit `modelOverride` entirely unless the
-user explicitly requested one; never pass an empty string.
+`maxDurationSeconds` for the Minions watchdog. The runtime ignores and reports an
+accidental Paseo `timeoutSeconds` value; it never lets that ordinary-Pi field shorten
+the Paseo watchdog. Treat that warning as a payload bug and omit the field on the next
+spawn, rather than retrying the worker or changing its role. Omit `modelOverride`
+entirely unless the user explicitly requested one; never pass an empty string.

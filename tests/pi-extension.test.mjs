@@ -720,6 +720,7 @@ test("Copilot LB preserves roles when a frontier repeats invalid judgment fields
   assert.equal(result.details.workers.every((worker) => worker.routeOverride === undefined), true);
   assert.equal(result.details.workers.every((worker) => /mechanical role/.test(worker.routeOverrideRejection)), true);
   assert.match(result.content[0].text, /Ignored 3 invalid route override/);
+  assert.match(result.content[0].text, /explorer .*mechanical-judgment is valid only for the mechanical role/);
 });
 
 test("the wrapper enforces six concurrent workers", async () => {
@@ -1236,7 +1237,7 @@ test("review workers load Matt's code-review discipline and use the nested-capab
   assert.equal(params.skill, "code-review");
 });
 
-test("blank model overrides fall back and Paseo deadlines use the watchdog", async () => {
+test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", async () => {
   const calls = [];
   const paseoRuntime = {
     kind: "paseo",
@@ -1275,7 +1276,19 @@ test("blank model overrides fall back and Paseo deadlines use the watchdog", asy
   assert.equal(spawnCall.params.model, "github-copilot/gpt-5.6-terra:max");
   assert.equal(Object.hasOwn(spawnCall.params, "timeoutMs"), false);
   assert.equal(result.details.workers[0].timeoutSeconds, 900);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 900);
+  assert.equal(result.details.workers[0].timeoutSecondsIgnored, true);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 1800);
+  assert.match(result.content[0].text, /Ignored timeoutSeconds for 1 Paseo worker/);
+  assert.match(result.content[0].text, /Do not retry with timeoutSeconds/);
+
+  const incidentRegression = await spawn(harness, [{
+    role: "implementer",
+    task: "Implement one bounded slice",
+    cwd: "/repo/.worktrees/paseo-timeout-regression",
+    timeoutSeconds: 30,
+  }]);
+  assert.equal(incidentRegression.details.workers[0].timeoutSecondsIgnored, true);
+  assert.equal(incidentRegression.details.workers[0].maxDurationSeconds, 35 * 60);
 });
 
 test("Paseo sessions use native child agents without dispatching pi-subagents", async () => {

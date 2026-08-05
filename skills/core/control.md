@@ -44,6 +44,12 @@ Spawn a task only when every applicable check passes:
 8. **Budget** - fewer than thirty worker results have been triaged and fewer than
    thirty workers have been launched. At eight or more triaged results, the task must
    be already-boarded closure work and be marked as closure through the platform adapter.
+9. **Payload** - omit every optional field that is not intentionally used. On Paseo,
+   never set `timeoutSeconds`; use only `maxDurationSeconds`. Do not send empty model,
+   route, evidence, deadline, or budget values.
+10. **Slice size** - an implementation task is one reviewable, commit-sized slice with
+    explicit acceptance criteria. A broad issue range must be decomposed before a
+    writer starts, even when all writes will later be serialized in one worktree.
 
 If a check fails, do not spawn. Update the board, ask one user question when needed,
 or prepare a handoff.
@@ -63,10 +69,11 @@ applied only when its structured evidence is valid:
 - initial discovery, implementation, review, setup, and gates always use their normal
   role routes. Complexity alone is not escalation evidence.
 
-An invalid named override is recorded on the worker and downgraded to the normal role
-route instead of failing the spawn. This preserves the requested semantic role and
-prevents retry loops from converting implementers or reviewers into mechanical
-workers. A user-requested model is separate: use `modelOverride` only when the user explicitly
+An invalid named override is recorded on the worker, explained in the spawn result,
+and downgraded to the normal role route instead of failing the spawn. Correct the next
+payload; do not repeat the override or reinterpret its rejection as worker failure.
+This preserves the requested semantic role and prevents retry loops from converting
+implementers or reviewers into mechanical workers. A user-requested model is separate: use `modelOverride` only when the user explicitly
 names the model, and omit it otherwise.
 
 ## Counters

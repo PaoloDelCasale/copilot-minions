@@ -68,7 +68,7 @@ export const schemas = {
       timeoutSeconds: Type.Optional(Type.Integer({
         minimum: 1,
         maximum: 3600,
-        description: "Optional hard worker deadline in seconds. Omit on Paseo; use maxDurationSeconds for its watchdog.",
+        description: "Ordinary Pi only: optional package-owned hard deadline. NEVER set this on Paseo; Paseo ignores it and uses maxDurationSeconds.",
       })),
       maxCostUsd: Type.Optional(Type.Number({
         exclusiveMinimum: 0,
@@ -78,7 +78,7 @@ export const schemas = {
       maxDurationSeconds: Type.Optional(Type.Integer({
         minimum: 60,
         maximum: 14400,
-        description: "Optional worker wall-clock ceiling; defaults are model-aware.",
+        description: "Optional model-aware worker wall-clock watchdog; this is the only duration field to use on Paseo.",
       })),
     }), { minItems: 1, maxItems: 6 }),
   }),
