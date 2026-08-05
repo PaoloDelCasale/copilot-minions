@@ -296,9 +296,11 @@ architecture owner when Goal, Spec, fixed point, worktree, and budget eligibilit
 unchanged. Reviewers remain fresh and independent, while simple gate or compatibility
 fixes stay on mechanical or implementer routes. Deliberately stopped workers remain
 non-resumable. Paseo 0.2.5 does not expose a provider-persistent child deadline, so
-frontiers omit `timeoutSeconds` and use the model-aware watchdog. If an accidental
-Paseo timeout is supplied, the wrapper maps it to the stricter watchdog duration
-instead of forwarding an unsupported deadline.
+frontiers omit `timeoutSeconds` and use `maxDurationSeconds` for the model-aware
+watchdog. If an accidental Paseo timeout is supplied, the wrapper ignores it, retains
+the configured or model-default watchdog, records the ignored request, and returns an
+actionable spawn warning. This prevents an ordinary-Pi deadline from silently reducing
+a multi-hour Paseo assignment to a few seconds.
 
 The wrapper enforces six concurrent workers and thirty launches. Eight triaged
 results trigger a soft gate that accepts only `budgetClass: "closure"` work; thirty

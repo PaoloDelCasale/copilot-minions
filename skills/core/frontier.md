@@ -30,7 +30,9 @@ grill
 ```
 
 Keep live back-and-forth on the frontier. Give workers structured decisions, not the
-chat transcript.
+chat transcript. Keep diagnostic output bounded: never dump an entire shared worktree
+registry or repeated full command output when one filtered ref, path, or status answers
+the question.
 
 ## Orchestration
 
@@ -40,10 +42,15 @@ contract before decomposition and apply its pre-spawn checks before every dispat
 1. Decompose only the current Goal into tasks with IDs, types, specs, paths, and
    dependency edges.
 2. Post the run contract and initial full board from [`state.md`](state.md).
-3. Spawn only unblocked, in-scope work, with at most six workers in flight.
+3. Spawn only unblocked, in-scope work, with at most six workers in flight. Each
+   implementation worker receives one reviewable slice, not an unbounded issue range;
+   split broad requests by coherent acceptance criteria and file ownership first.
 4. Batch independent tasks; never parallelize dependent writes.
 5. Triage each worker result through the STATUS protocol and increment the Triage
-   counter once per worker result.
+   counter once per worker result. A worker that stops without its STATUS is a runtime
+   incident: inspect its recorded stop reason and spawn contract before any retry.
+   Never change role, escalate, or shrink the slice repeatedly while preserving the
+   same timeout or payload defect.
 6. At eight triaged results, enter closure mode and dispatch only already-boarded
    fix, review, gate, commit, or landing tasks using the adapter's closure classification.
 7. At thirty triaged results, stop dispatching, drain in-flight work, post the full

@@ -415,6 +415,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       startedAt: worker.startedAt,
       completedAt: worker.completedAt,
       timeoutSeconds: worker.timeoutSeconds,
+      timeoutSecondsIgnored: worker.timeoutSecondsIgnored,
       maxCostUsd: worker.maxCostUsd,
       warningCostUsd: worker.warningCostUsd,
       maxDurationSeconds: worker.maxDurationSeconds,
@@ -671,10 +672,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const discipline = requestedDiscipline(spec.task);
     const disciplineLoaded = Boolean(discipline && resolveDiscipline(discipline, cwd));
     const budget = MODEL_BUDGETS[modelId] ?? MODEL_BUDGETS["gpt-5.6-terra"];
-    const configuredMaxDurationSeconds = spec.maxDurationSeconds ?? budget.maxDurationSeconds;
-    const maxDurationSeconds = run.runtime === "paseo" && spec.timeoutSeconds
-      ? Math.min(configuredMaxDurationSeconds, spec.timeoutSeconds)
-      : configuredMaxDurationSeconds;
+    const maxDurationSeconds = spec.maxDurationSeconds ?? budget.maxDurationSeconds;
+    const timeoutSecondsIgnored = run.runtime === "paseo" && spec.timeoutSeconds !== undefined;
     return {
       modelId,
       thinking,
@@ -685,6 +684,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         ? budget.warningCostUsd
         : Math.round(spec.maxCostUsd * 0.67 * 100) / 100,
       maxDurationSeconds,
+      timeoutSecondsIgnored,
       agent: ROLE_AGENTS[spec.role],
       budgetClass,
       requestedRouteOverride: spec.routeOverride,
@@ -744,6 +744,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       status: "in-flight",
       startedAt: now(),
       timeoutSeconds: task.timeoutSeconds,
+      timeoutSecondsIgnored: route.timeoutSecondsIgnored,
       maxCostUsd: route.maxCostUsd,
       warningCostUsd: route.warningCostUsd,
       maxDurationSeconds: route.maxDurationSeconds,
@@ -1133,17 +1134,19 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       run.launchCount += workers.length;
       persistRun();
       const rejectedRouteOverrides = workers.filter((worker) => worker.routeOverrideRejection);
+      const routeOverrideNotice = rejectedRouteOverrides.length > 0
+        ? ` Ignored ${rejectedRouteOverrides.length} invalid route override(s) and used the normal role matrix: ${rejectedRouteOverrides.map((worker) => `${worker.role} ${worker.id}: ${worker.routeOverrideRejection}`).join("; ")}.`
+        : "";
       const rejectedModelOverrides = workers.filter((worker) => worker.modelOverrideRejection);
-      const routingNotices = [
-        rejectedRouteOverrides.length > 0
-          ? ` Ignored ${rejectedRouteOverrides.length} invalid route override(s) and used the normal role matrix.`
-          : "",
-        rejectedModelOverrides.length > 0
-          ? ` Ignored ${rejectedModelOverrides.length} invalid model override(s) and used the normal role matrix.`
-          : "",
-      ].join("");
+      const modelOverrideNotice = rejectedModelOverrides.length > 0
+        ? ` Ignored ${rejectedModelOverrides.length} invalid model override(s) and used the normal role matrix: ${rejectedModelOverrides.map((worker) => `${worker.role} ${worker.id}: ${worker.modelOverrideRejection}`).join("; ")}.`
+        : "";
+      const ignoredTimeouts = workers.filter((worker) => worker.timeoutSecondsIgnored);
+      const timeoutNotice = ignoredTimeouts.length > 0
+        ? ` Ignored timeoutSeconds for ${ignoredTimeouts.length} Paseo worker(s); their model-aware maxDurationSeconds watchdog remains ${ignoredTimeouts.map((worker) => `${worker.id}=${worker.maxDurationSeconds}s`).join(", ")}. Do not retry with timeoutSeconds.`
+        : "";
       return textResult(
-        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routingNotices} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
+        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routeOverrideNotice}${modelOverrideNotice}${timeoutNotice} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
         { workers: workers.map(workerSnapshot) },
       );
     },
