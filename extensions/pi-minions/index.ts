@@ -63,7 +63,7 @@ export const schemas = {
         description: "Terminal, triaged worker whose recorded result justifies an escalation override. Omit for normal routing and mechanical judgment.",
       })),
       modelOverride: Type.Optional(Type.String({
-        description: "Model ID only; omit this key entirely unless the user explicitly requested an override. Never pass an empty string.",
+        description: "Model ID only. The runtime accepts the exact model only when raw user input explicitly requested it for the next batch; otherwise it audits and downgrades to role routing. Omit this key for normal dispatch and never pass an empty string.",
       })),
       timeoutSeconds: Type.Optional(Type.Integer({
         minimum: 1,

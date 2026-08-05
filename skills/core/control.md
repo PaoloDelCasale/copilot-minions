@@ -73,8 +73,11 @@ An invalid named override is recorded on the worker, explained in the spawn resu
 and downgraded to the normal role route instead of failing the spawn. Correct the next
 payload; do not repeat the override or reinterpret its rejection as worker failure.
 This preserves the requested semantic role and prevents retry loops from converting
-implementers or reviewers into mechanical workers. A user-requested model is separate: use `modelOverride` only when the user explicitly
-names the model, and omit it otherwise.
+implementers or reviewers into mechanical workers. A user-requested model is
+separate: use `modelOverride` only when the user explicitly requests that exact model.
+The runtime derives a one-batch authorization from raw user input; an unauthorized
+override is audited, explained, and downgraded to the normal role route. Omit
+`modelOverride` otherwise.
 
 ## Counters
 

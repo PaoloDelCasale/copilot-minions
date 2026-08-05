@@ -14,7 +14,8 @@ Workspace for a Minions worker.
 
 Never pass a provider. Normal dispatch omits `modelOverride`, `routeOverride`,
 `overrideReason`, and `overrideFromWorkerId`. Pass `modelOverride` only when the user
-explicitly requested a model. A named route must carry the structured judgment or
+explicitly requested that exact model for the next batch; the runtime audits and
+downgrades any unauthorized value to role routing. A named route must carry the structured judgment or
 prior-worker evidence required by [`control.md`](control.md); complexity alone never
 qualifies. Invalid named overrides are audited and downgraded to the normal role route
 so a frontier cannot evade routing by changing worker roles after a rejected spawn.
@@ -45,4 +46,5 @@ this adapter, so omit `timeoutSeconds` for Paseo-managed workers and use
 accidental Paseo `timeoutSeconds` value; it never lets that ordinary-Pi field shorten
 the Paseo watchdog. Treat that warning as a payload bug and omit the field on the next
 spawn, rather than retrying the worker or changing its role. Omit `modelOverride`
-entirely unless the user explicitly requested one; never pass an empty string.
+entirely unless raw user input explicitly requested that exact model for the next
+batch; never pass an empty string.

@@ -48,6 +48,28 @@ const ROLE_AGENTS = {
 };
 const MINIONS_OPT_OUT = /(?:^|\s)(?:\/direct\b|skip\s+(?:minions|workers)\b|senza\s+minions?\b|non\s+usare\s+minions?\b)/i;
 const MINIONS_SKILL_COMMAND = /^\/skill:(pi|paseo|codex)-minions(-lb)?(?=\s|$)/;
+const MODEL_ID = /\b(?:gpt|claude|grok)-[a-z0-9][a-z0-9._-]*\b/gi;
+const MODEL_REQUEST = /\b(?:use|using|choose|select|force|route|run|spawn|dispatch|prefer|want|usa|usare|utilizza|utilizzare|scegli|scegliere|seleziona|selezionare|forza|forzare|instrada|instradare|preferisco|voglio)\b/i;
+const NEGATED_MODEL_REQUEST = /\b(?:do\s+not|don't|never|avoid|non\s+(?:usare|utilizzare|voglio)|senza\s+(?:usare|utilizzare)|evita(?:re)?)\b/i;
+const MODEL_REQUEST_BOUNDARIES = [".", "!", "?", ";", "\n"];
+
+function explicitlyRequestedModels(text) {
+  if (typeof text !== "string") return new Set();
+  const requested = new Set();
+  for (const match of text.matchAll(MODEL_ID)) {
+    const precedingBoundaries = MODEL_REQUEST_BOUNDARIES
+      .map((boundary) => text.lastIndexOf(boundary, match.index - 1));
+    const followingBoundaries = MODEL_REQUEST_BOUNDARIES
+      .map((boundary) => text.indexOf(boundary, match.index + match[0].length))
+      .filter((index) => index >= 0);
+    const start = Math.max(...precedingBoundaries) + 1;
+    const end = followingBoundaries.length > 0 ? Math.min(...followingBoundaries) : text.length;
+    const clause = text.slice(start, end);
+    if (!MODEL_REQUEST.test(clause) || NEGATED_MODEL_REQUEST.test(clause)) continue;
+    requested.add(match[0].toLowerCase());
+  }
+  return requested;
+}
 
 function slashSkill(text) {
   const match = typeof text === "string" ? text.match(MINIONS_SKILL_COMMAND) : undefined;
@@ -361,6 +383,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   let changingModel = false;
   let minionsRoutingRequired = false;
   let pendingSlashVariant;
+  let pendingModelOverrideAuthorizations = new Set();
   let lastContext;
   let watchdogTimer;
   let watchdogRunning = false;
@@ -385,6 +408,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       overrideReason: worker.overrideReason,
       overrideFromWorkerId: worker.overrideFromWorkerId,
       routeOverrideRejection: worker.routeOverrideRejection,
+      requestedModelOverride: worker.requestedModelOverride,
+      modelOverride: worker.modelOverride,
+      modelOverrideRejection: worker.modelOverrideRejection,
       status: worker.status,
       startedAt: worker.startedAt,
       completedAt: worker.completedAt,
@@ -427,6 +453,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       runCostCeilingUsd: run.runCostCeilingUsd,
       runBudgetWarningSent: run.runBudgetWarningSent,
       dispatchBlockedReason: run.dispatchBlockedReason,
+      modelOverrideAuthorizations: [...run.modelOverrideAuthorizations],
       workers: [...run.workers.values()].map(workerSnapshot),
     });
   }
@@ -468,6 +495,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       runCostCeilingUsd: latest.runCostCeilingUsd ?? runCostCeilingUsd,
       runBudgetWarningSent: latest.runBudgetWarningSent ?? false,
       dispatchBlockedReason: latest.dispatchBlockedReason,
+      modelOverrideAuthorizations: new Set(latest.modelOverrideAuthorizations ?? []),
       workers,
     };
     ctx.ui?.setStatus?.("pi-minions", `${run.provider} · ${run.variant} · recovered`);
@@ -623,8 +651,15 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
     const route = appliedRouteOverride ? matrix.overrides[appliedRouteOverride] : roleRoute;
     const [defaultModel, thinking] = route;
-    const requestedModel = typeof spec.modelOverride === "string" ? spec.modelOverride.trim() : "";
-    const modelId = requestedModel || defaultModel;
+    const requestedModelOverride = typeof spec.modelOverride === "string" ? spec.modelOverride.trim() : "";
+    const modelOverrideRejection = requestedModelOverride
+      && !run.modelOverrideAuthorizations.has(requestedModelOverride.toLowerCase())
+      ? `model override ${requestedModelOverride} was not explicitly requested by the user for this batch`
+      : undefined;
+    const modelOverride = requestedModelOverride && !modelOverrideRejection
+      ? requestedModelOverride
+      : undefined;
+    const modelId = modelOverride || defaultModel;
     if (!ctx.modelRegistry.find(run.provider, modelId)) {
       throw new Error(`Provider ${run.provider} does not offer requested model ${modelId}.`);
     }
@@ -655,6 +690,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       requestedRouteOverride: spec.routeOverride,
       routeOverride: appliedRouteOverride,
       routeOverrideRejection: rejection,
+      requestedModelOverride: requestedModelOverride || undefined,
+      modelOverride,
+      modelOverrideRejection,
       discipline,
       disciplineLoaded,
     };
@@ -699,6 +737,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       overrideReason: route.routeOverride ? task.overrideReason : undefined,
       overrideFromWorkerId: route.routeOverride ? task.overrideFromWorkerId : undefined,
       routeOverrideRejection: route.routeOverrideRejection,
+      requestedModelOverride: route.requestedModelOverride,
+      modelOverride: route.modelOverride,
+      modelOverrideRejection: route.modelOverrideRejection,
       displayNumber: run.nextWorkerNumber++,
       status: "in-flight",
       startedAt: now(),
@@ -953,6 +994,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     description: "Explicitly start Minions orchestration in the current workspace",
     handler: async (args) => {
       pendingSlashVariant = "standard";
+      pendingModelOverrideAuthorizations = explicitlyRequestedModels(args);
       minionsRoutingRequired = true;
       const suffix = args.trim();
       pi.sendUserMessage(`/skill:pi-minions${suffix ? ` ${suffix}` : ""}`);
@@ -963,6 +1005,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     description: "Explicitly start low-budget Minions orchestration in the current workspace",
     handler: async (args) => {
       pendingSlashVariant = "lb";
+      pendingModelOverrideAuthorizations = explicitlyRequestedModels(args);
       minionsRoutingRequired = true;
       const suffix = args.trim();
       pi.sendUserMessage(`/skill:pi-minions-lb${suffix ? ` ${suffix}` : ""}`);
@@ -1022,7 +1065,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         triagedCount: 0,
         runCostCeilingUsd: params.maxRunCostUsd ?? runCostCeilingUsd,
         runBudgetWarningSent: false,
+        modelOverrideAuthorizations: new Set(pendingModelOverrideAuthorizations),
       };
+      pendingModelOverrideAuthorizations = new Set();
       ctx.ui?.setStatus?.("pi-minions", `${provider} · ${variant}`);
       persistRun();
       startWatchdog();
@@ -1058,6 +1103,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (run.dispatchBlockedReason) throw new Error(run.dispatchBlockedReason);
       const routes = tasks.map((task) => resolveWorkerRoute(task, ctx));
       enforceWriterLeases(tasks, routes);
+      if (run.modelOverrideAuthorizations.size > 0) {
+        run.modelOverrideAuthorizations.clear();
+        persistRun();
+      }
       const settled = await Promise.allSettled(tasks.map((task, index) => runtimeCall("spawn", spawnParams(task, routes[index]))));
       const launched = settled
         .map((result, index) => ({ result, index }))
@@ -1084,16 +1133,20 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const workers = launched.map(({ result, index }) => registerSpawnedWorker(result.value, tasks[index], routes[index], ctx));
       run.launchCount += workers.length;
       persistRun();
-      const rejectedOverrides = workers.filter((worker) => worker.routeOverrideRejection);
-      const routingNotice = rejectedOverrides.length > 0
-        ? ` Ignored ${rejectedOverrides.length} invalid route override(s) and used the normal role matrix: ${rejectedOverrides.map((worker) => `${worker.role} ${worker.id}: ${worker.routeOverrideRejection}`).join("; ")}.`
+      const rejectedRouteOverrides = workers.filter((worker) => worker.routeOverrideRejection);
+      const routeOverrideNotice = rejectedRouteOverrides.length > 0
+        ? ` Ignored ${rejectedRouteOverrides.length} invalid route override(s) and used the normal role matrix: ${rejectedRouteOverrides.map((worker) => `${worker.role} ${worker.id}: ${worker.routeOverrideRejection}`).join("; ")}.`
+        : "";
+      const rejectedModelOverrides = workers.filter((worker) => worker.modelOverrideRejection);
+      const modelOverrideNotice = rejectedModelOverrides.length > 0
+        ? ` Ignored ${rejectedModelOverrides.length} invalid model override(s) and used the normal role matrix: ${rejectedModelOverrides.map((worker) => `${worker.role} ${worker.id}: ${worker.modelOverrideRejection}`).join("; ")}.`
         : "";
       const ignoredTimeouts = workers.filter((worker) => worker.timeoutSecondsIgnored);
       const timeoutNotice = ignoredTimeouts.length > 0
         ? ` Ignored timeoutSeconds for ${ignoredTimeouts.length} Paseo worker(s); their model-aware maxDurationSeconds watchdog remains ${ignoredTimeouts.map((worker) => `${worker.id}=${worker.maxDurationSeconds}s`).join(", ")}. Do not retry with timeoutSeconds.`
         : "";
       return textResult(
-        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routingNotice}${timeoutNotice} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
+        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routeOverrideNotice}${modelOverrideNotice}${timeoutNotice} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
         { workers: workers.map(workerSnapshot) },
       );
     },
@@ -1298,6 +1351,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       run = undefined;
       stopWatchdog();
       pendingSlashVariant = undefined;
+      pendingModelOverrideAuthorizations = new Set();
       minionsRoutingRequired = false;
       ctx.ui?.setStatus?.("pi-minions", undefined);
       const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${closing.runtime === "paseo" ? "Paseo agents" : "pi-subagents artifacts and resumable sessions"} remain available.`, {
@@ -1312,12 +1366,19 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     if (event.source === "extension") return { action: "continue" };
     if (MINIONS_OPT_OUT.test(event.text)) {
       pendingSlashVariant = undefined;
+      pendingModelOverrideAuthorizations = new Set();
       minionsRoutingRequired = Boolean(run);
       return { action: "continue" };
+    }
+    const requestedModels = explicitlyRequestedModels(event.text);
+    if (run && requestedModels.size > 0) {
+      for (const modelId of requestedModels) run.modelOverrideAuthorizations.add(modelId);
+      persistRun();
     }
     const skill = slashSkill(event.text);
     if (skill) {
       pendingSlashVariant = skill.variant;
+      pendingModelOverrideAuthorizations = requestedModels;
       minionsRoutingRequired = true;
       if (skill.matchedName !== skill.canonicalName) {
         return {
@@ -1329,6 +1390,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
     if (!run) {
       pendingSlashVariant = undefined;
+      pendingModelOverrideAuthorizations = new Set();
       minionsRoutingRequired = false;
     }
     return { action: "continue" };
@@ -1350,7 +1412,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       systemPrompt: `${event.systemPrompt}
 
-Minions is strictly slash-command-only. Never infer, select, or start Minions from a natural-language request, even when the user mentions Minions, orchestration, parallel agents, or workers. Only an explicit /minions, /minions-lb, or corresponding /skill:pi-minions slash invocation authorizes minions_start; without one, perform ordinary single-agent work and never call any minions_* tool. During an authorized Minions run, call minions_start first and use only minions_* tools for orchestration. Minions owns provider affinity, role routing, budgets, board identity, and worker lifecycle. In Paseo, never call MCP create_workspace and never create another Paseo Workspace for Minions. Do not call generic MCP create_agent, send_agent_prompt, or the generic subagent tool for top-level dispatch. minions_spawn creates native child agents in the caller's existing Paseo workspace. Write isolation uses linked Git worktree directories passed as worker cwd; a Git worktree is not a Paseo Workspace. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
+Minions is strictly slash-command-only. Never infer, select, or start Minions from a natural-language request, even when the user mentions Minions, orchestration, parallel agents, or workers. Only an explicit /minions, /minions-lb, or corresponding /skill:pi-minions slash invocation authorizes minions_start; without one, perform ordinary single-agent work and never call any minions_* tool. During an authorized Minions run, call minions_start first and use only minions_* tools for orchestration. Minions owns provider affinity, role routing, budgets, board identity, and worker lifecycle. Normal minions_spawn calls must omit modelOverride; the runtime accepts it only when the raw user input explicitly requested that exact model for the next batch. In Paseo, never call MCP create_workspace and never create another Paseo Workspace for Minions. Do not call generic MCP create_agent, send_agent_prompt, or the generic subagent tool for top-level dispatch. minions_spawn creates native child agents in the caller's existing Paseo workspace. Write isolation uses linked Git worktree directories passed as worker cwd; a Git worktree is not a Paseo Workspace. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
     };
   });
 
