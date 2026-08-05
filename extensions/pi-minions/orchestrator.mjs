@@ -4,10 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createPaseoRuntimeFromProcess } from "./paseo-runtime.mjs";
+import { createOrcaRuntimeFromProcess } from "./orca-runtime.mjs";
 
 const SUPPORTED_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
 const SUPPORTED_VARIANTS = new Set(["standard", "lb"]);
-const SUPPORTED_RUNTIMES = new Set(["pi-subagents", "paseo"]);
+const SUPPORTED_RUNTIMES = new Set(["pi-subagents", "paseo", "orca"]);
 const SUBAGENTS_RPC_VERSION = 1;
 const SUBAGENTS_RPC_REQUEST = "subagents:rpc:v1:request";
 const SUBAGENTS_RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:";
@@ -29,13 +30,13 @@ const ESCALATION_REASONS = new Set([
 const WRITER_ROLES = new Set(["implementer", "architect"]);
 const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
-const DEFAULT_RUN_COST_CEILING_USD = 40;
+const DEFAULT_RUN_COST_CEILING_USD = 160;
 const MODEL_BUDGETS = {
-  "claude-opus-5": { warningCostUsd: 10, maxCostUsd: 15, maxDurationSeconds: 50 * 60 },
-  "gpt-5.6-luna": { warningCostUsd: 4, maxCostUsd: 6, maxDurationSeconds: 30 * 60 },
-  "gpt-5.6-sol": { warningCostUsd: 10, maxCostUsd: 15, maxDurationSeconds: 45 * 60 },
-  "gpt-5.6-terra": { warningCostUsd: 6, maxCostUsd: 10, maxDurationSeconds: 35 * 60 },
-  "grok-4.5": { warningCostUsd: 6, maxCostUsd: 10, maxDurationSeconds: 35 * 60 },
+  "claude-opus-5": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 50 * 60 },
+  "gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 30 * 60 },
+  "gpt-5.6-sol": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 45 * 60 },
+  "gpt-5.6-terra": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 35 * 60 },
+  "grok-4.5": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 35 * 60 },
 };
 const REQUIRED_RPC_METHODS = ["ping", "status", "spawn", "steer", "stop", "resume"];
 const ROLE_AGENTS = {
@@ -378,6 +379,16 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     : dependencies.paseoRuntime;
   const paseoHosted = dependencies.paseoHosted
     ?? Boolean((dependencies.paseoOptions?.env ?? process.env).PASEO_AGENT_ID?.trim());
+  const orcaRuntime = dependencies.orcaRuntime === undefined
+    ? createOrcaRuntimeFromProcess(dependencies.orcaOptions)
+    : dependencies.orcaRuntime;
+  const orcaEnvironment = dependencies.orcaOptions?.env ?? process.env;
+  const orcaHosted = dependencies.orcaHosted
+    ?? Boolean(
+      orcaEnvironment.ORCA_TERMINAL_HANDLE?.trim()
+      || orcaEnvironment.ORCA_WORKTREE_ID?.trim()
+      || orcaEnvironment.ORCA_AGENT_HOOK_ENDPOINT?.trim(),
+    );
   let run;
   let runtimeInfo;
   let changingModel = false;
@@ -394,6 +405,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       id: worker.id,
       subagentRunId: worker.subagentRunId,
       runtimeAgentId: worker.runtimeAgentId,
+      runtimeTerminalId: worker.runtimeTerminalId,
+      runtimeTaskId: worker.runtimeTaskId,
       asyncDir: worker.asyncDir,
       role: worker.role,
       agent: worker.agent,
@@ -444,6 +457,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       provider: run.provider,
       variant: run.variant,
       runtime: run.runtime,
+      runtimeRunId: run.runtimeRunId,
       lifecycle,
       originalModel: run.originalModel,
       originalThinking: run.originalThinking,
@@ -486,6 +500,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       provider: latest.provider,
       variant: latest.variant,
       runtime: latest.runtime ?? "pi-subagents",
+      runtimeRunId: latest.runtimeRunId,
       originalModel: latest.originalModel,
       originalThinking: latest.originalThinking,
       nextWorkerNumber: latest.nextWorkerNumber ?? Math.max(0, ...[...workers.values()].map((worker) => worker.displayNumber ?? 0)) + 1,
@@ -546,7 +561,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   }
 
   function runtimeKind() {
-    return run?.runtime ?? (paseoHosted || paseoRuntime ? "paseo" : "pi-subagents");
+    if (run?.runtime) return run.runtime;
+    if (paseoHosted) return "paseo";
+    if (orcaHosted) return "orca";
+    if (paseoRuntime) return "paseo";
+    if (orcaRuntime) return "orca";
+    return "pi-subagents";
   }
 
   function runtimeCall(method, params) {
@@ -556,14 +576,20 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       }
       return paseoRuntime.call(method, params);
     }
+    if (runtimeKind() === "orca") {
+      if (!orcaRuntime) {
+        return Promise.reject(new Error("This orchestration runs inside Orca, but its native CLI identity is incomplete or unavailable. Reopen Pi from a live Orca terminal."));
+      }
+      return orcaRuntime.call(method, params);
+    }
     return piSubagentsRpcCall(method, params);
   }
 
   async function ensureRuntime() {
     if (runtimeInfo) return runtimeInfo;
-    const info = await runtimeCall("ping");
-    if (runtimeKind() === "paseo") {
-      if (info?.runtime !== "paseo") throw new Error("Incompatible Paseo Minions runtime.");
+    const info = await runtimeCall("ping", { runId: run?.runtimeRunId });
+    if (runtimeKind() === "paseo" || runtimeKind() === "orca") {
+      if (info?.runtime !== runtimeKind()) throw new Error(`Incompatible ${runtimeKind()} Minions runtime.`);
       runtimeInfo = info;
       return info;
     }
@@ -673,7 +699,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const disciplineLoaded = Boolean(discipline && resolveDiscipline(discipline, cwd));
     const budget = MODEL_BUDGETS[modelId] ?? MODEL_BUDGETS["gpt-5.6-terra"];
     const maxDurationSeconds = spec.maxDurationSeconds ?? budget.maxDurationSeconds;
-    const timeoutSecondsIgnored = run.runtime === "paseo" && spec.timeoutSeconds !== undefined;
+    const timeoutSecondsIgnored = run.runtime !== "pi-subagents" && spec.timeoutSeconds !== undefined;
     return {
       modelId,
       thinking,
@@ -708,7 +734,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       async: true,
       clarify: false,
       artifacts: true,
-      ...(spec.timeoutSeconds && run.runtime !== "paseo" ? { timeoutMs: spec.timeoutSeconds * 1_000 } : {}),
+      ...(spec.timeoutSeconds && run.runtime === "pi-subagents" ? { timeoutMs: spec.timeoutSeconds * 1_000 } : {}),
       ...(route.disciplineLoaded ? { skill: route.discipline } : {}),
       control: {
         enabled: true,
@@ -723,6 +749,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       id: idFactory(),
       subagentRunId: data.details.asyncId,
       runtimeAgentId: data.details.runtimeAgentId,
+      runtimeTerminalId: data.details.runtimeTerminalId,
+      runtimeTaskId: data.details.runtimeTaskId,
       asyncDir: data.details.asyncDir,
       role: task.role,
       agent: route.agent,
@@ -799,10 +827,15 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       id: worker.runtimeAgentId ?? worker.subagentRunId,
       ...(run.runtime === "paseo" ? { runId: worker.subagentRunId } : {}),
+      ...(run.runtime === "orca" ? {
+        runId: worker.subagentRunId,
+        terminalId: worker.runtimeTerminalId,
+        taskId: worker.runtimeTaskId,
+      } : {}),
     };
   }
 
-  function applyCompletion(worker, payload, ctx) {
+  function applyCompletion(worker, payload, ctx, { notify = false } = {}) {
     const subagentRunId = payload?.runId ?? payload?.id ?? worker.subagentRunId;
     worker.observedRunIds ??= new Set();
     const firstObservation = !worker.observedRunIds.has(subagentRunId);
@@ -819,6 +852,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     }
     persistRun();
     ctx?.ui?.setStatus?.("pi-minions", `${run.provider} · ${run.variant}`);
+    if (notify && firstObservation && run.runtime === "orca") {
+      pi.sendMessage?.({
+        customType: "pi-minions-orca-complete",
+        content: `Orca Minions worker ${worker.id} (${worker.role}) reached ${worker.status}. Call minions_read, update the board, and dispatch newly unblocked work.`,
+        display: true,
+        details: { workerId: worker.id, role: worker.role, status: worker.status },
+      }, { triggerTurn: true, deliverAs: "followUp" });
+    }
   }
 
   function onAsyncComplete(payload) {
@@ -849,7 +890,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   };
   globalThis[completionListenerKey] = disposeCompletionListener;
 
-  async function refreshWorker(worker, ctx, { includeActivity = true } = {}) {
+  async function refreshWorker(worker, ctx, { includeActivity = true, notifyCompletion = false } = {}) {
     if (!activeStatus(worker.status)) return;
     const data = await runtimeCall("status", {
       ...runtimeTarget(worker),
@@ -888,7 +929,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         }
       }
       worker.terminalCandidate = undefined;
-      applyCompletion(worker, completion, ctx);
+      applyCompletion(worker, completion, ctx, { notify: notifyCompletion });
       return;
     }
     if (["complete", "completed", "failed", "stopped", "paused"].includes(parsed.state)) {
@@ -900,7 +941,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         state: lifecycle?.state ?? parsed.state,
         ...(summary ? { summary } : {}),
         ...(lifecycle?.error || parsed.error ? { error: lifecycle?.error ?? parsed.error } : {}),
-      }, ctx);
+      }, ctx, { notify: notifyCompletion });
       if (worker.status === "blocked" && !worker.error) {
         worker.error = `${run.runtime} reported a failed run.`;
       }
@@ -948,13 +989,14 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   }
 
   async function watchdogTick() {
-    if (watchdogRunning || !run || run.runtime !== "paseo" || !lastContext) return;
+    if (watchdogRunning || !run || !["paseo", "orca"].includes(run.runtime) || !lastContext) return;
     watchdogRunning = true;
     try {
+      await ensureRuntime();
       const active = [...run.workers.values()].filter((worker) => activeStatus(worker.status));
       for (const worker of active) {
         try {
-          await refreshWorker(worker, lastContext, { includeActivity: false });
+          await refreshWorker(worker, lastContext, { includeActivity: false, notifyCompletion: true });
           await enforceWorkerBudget(worker, lastContext);
         } catch (error) {
           worker.progress = `Watchdog status refresh unavailable: ${error instanceof Error ? error.message : String(error)}`;
@@ -977,7 +1019,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   }
 
   function startWatchdog() {
-    if (watchdogTimer !== undefined || !run || run.runtime !== "paseo") return;
+    if (watchdogTimer !== undefined || !run || !["paseo", "orca"].includes(run.runtime)) return;
     watchdogTimer = setWatchdogInterval(() => {
       void watchdogTick();
     }, watchdogIntervalMs);
@@ -1044,7 +1086,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const missing = matrix.requiredModels.filter((id) => !ctx.modelRegistry.find(provider, id));
       if (missing.length > 0) throw new Error(`Provider ${provider} is missing required model(s): ${missing.join(", ")}`);
       const selectedRuntime = runtimeKind();
-      await ensureRuntime();
+      const selectedRuntimeInfo = await ensureRuntime();
 
       const frontier = ctx.modelRegistry.find(provider, "gpt-5.6-sol");
       const originalModel = ctx.model;
@@ -1057,6 +1099,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         provider,
         variant,
         runtime: selectedRuntime,
+        runtimeRunId: selectedRuntimeInfo?.runId,
         originalModel,
         originalThinking,
         workers: new Map(),
@@ -1071,7 +1114,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       ctx.ui?.setStatus?.("pi-minions", `${provider} · ${variant}`);
       persistRun();
       startWatchdog();
-      const runtimeLabel = selectedRuntime === "paseo" ? "Paseo native agents" : "pi-subagents RPC v1";
+      const runtimeLabel = selectedRuntime === "paseo"
+        ? "Paseo native agents"
+        : selectedRuntime === "orca"
+          ? "Orca native orchestration"
+          : "pi-subagents RPC v1";
       return textResult(`Started ${variant} orchestration with Provider Affinity ${provider} on ${runtimeLabel}.`, {
         runId: run.id,
         provider,
@@ -1143,10 +1190,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         : "";
       const ignoredTimeouts = workers.filter((worker) => worker.timeoutSecondsIgnored);
       const timeoutNotice = ignoredTimeouts.length > 0
-        ? ` Ignored timeoutSeconds for ${ignoredTimeouts.length} Paseo worker(s); their model-aware maxDurationSeconds watchdog remains ${ignoredTimeouts.map((worker) => `${worker.id}=${worker.maxDurationSeconds}s`).join(", ")}. Do not retry with timeoutSeconds.`
+        ? ` Ignored timeoutSeconds for ${ignoredTimeouts.length} ${run.runtime === "paseo" ? "Paseo" : "Orca"} worker(s); their model-aware maxDurationSeconds watchdog remains ${ignoredTimeouts.map((worker) => `${worker.id}=${worker.maxDurationSeconds}s`).join(", ")}. Do not retry with timeoutSeconds.`
         : "";
       return textResult(
-        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routeOverrideNotice}${modelOverrideNotice}${timeoutNotice} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : "pi-subagents"} will notify this session on completion.`,
+        `Spawned ${workers.length} persistent worker(s): ${workers.map((worker) => `${worker.role} ${worker.id}`).join(", ")}.${routeOverrideNotice}${modelOverrideNotice}${timeoutNotice} End this turn now; do not poll. ${run.runtime === "paseo" ? "Paseo" : run.runtime === "orca" ? "Orca" : "pi-subagents"} will notify this session on completion.`,
         { workers: workers.map(workerSnapshot) },
       );
     },
@@ -1253,11 +1300,22 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         throw new Error(`Pi minions reached its ${MAX_WORKER_LAUNCHES}-launch worker budget.`);
       }
       await ensureRuntime();
-      const data = await runtimeCall("resume", { ...runtimeTarget(worker), message: params.message });
+      const data = await runtimeCall("resume", {
+        ...runtimeTarget(worker),
+        message: params.message,
+        ...(run.runtime === "orca" ? {
+          agent: worker.agent,
+          task: worker.task,
+          cwd: worker.cwd,
+          model: `${run.provider}/${worker.model}:${worker.thinking}`,
+        } : {}),
+      });
       const resumedId = data?.details?.asyncId;
       if (!resumedId) throw new Error(`${run.runtime} resume reply did not include a worker run id.`);
       worker.subagentRunId = resumedId;
       worker.runtimeAgentId = data.details.runtimeAgentId ?? worker.runtimeAgentId;
+      worker.runtimeTerminalId = data.details.runtimeTerminalId ?? worker.runtimeTerminalId;
+      worker.runtimeTaskId = data.details.runtimeTaskId ?? worker.runtimeTaskId;
       worker.asyncDir = data.details.asyncDir;
       worker.status = "in-flight";
       worker.startedAt = now();
@@ -1329,6 +1387,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       const active = [...run.workers.values()].filter((worker) => activeStatus(worker.status));
       if (active.length > 0) throw new Error(`Cannot close with ${active.length} live worker(s).`);
       const closing = run;
+      if (closing.runtime === "orca") {
+        await ensureRuntime();
+        const releases = await Promise.allSettled([...closing.workers.values()].map((worker) => runtimeCall("release", runtimeTarget(worker))));
+        const failedRelease = releases.find((result) => result.status === "rejected");
+        if (failedRelease) throw failedRelease.reason;
+      }
       const originalModel = closing.originalModel
         ? ctx.modelRegistry.find(closing.originalModel.provider, closing.originalModel.id)
         : undefined;
@@ -1354,7 +1418,12 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       pendingModelOverrideAuthorizations = new Set();
       minionsRoutingRequired = false;
       ctx.ui?.setStatus?.("pi-minions", undefined);
-      const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${closing.runtime === "paseo" ? "Paseo agents" : "pi-subagents artifacts and resumable sessions"} remain available.`, {
+      const residualLabel = closing.runtime === "paseo"
+        ? "Paseo agents remain available"
+        : closing.runtime === "orca"
+          ? "Orca worker output archives remain available"
+          : "pi-subagents artifacts and resumable sessions remain available";
+      const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${residualLabel}.`, {
         runId: closing.id,
       });
       if (pendingUsage) result.usage = pendingUsage;
@@ -1398,13 +1467,24 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
 
   pi.on("tool_call", (event) => {
     if (!run && !minionsRoutingRequired) return;
-    if (event.toolName !== "mcp") return;
-    const paseoTool = event.input?.tool ?? event.input?.describe;
-    if (!["paseo_create_workspace", "paseo_create_agent", "paseo_send_agent_prompt"].includes(paseoTool)) return;
-    return {
-      block: true,
-      reason: `${paseoTool} bypasses Minions. Use minions_spawn so native child agents remain in the current Paseo Workspace.`,
-    };
+    if (event.toolName === "mcp") {
+      const paseoTool = event.input?.tool ?? event.input?.describe;
+      if (!["paseo_create_workspace", "paseo_create_agent", "paseo_send_agent_prompt"].includes(paseoTool)) return;
+      return {
+        block: true,
+        reason: `${paseoTool} bypasses Minions. Use minions_spawn so native child agents remain in the current Paseo Workspace.`,
+      };
+    }
+    if (event.toolName === "bash" && runtimeKind() === "orca") {
+      const command = event.input?.command;
+      const mutatesWorkerLifecycle = typeof command === "string" && /\b(?:orca|orca-dev|orca-ide)(?:\.exe)?\s+(?:orchestration\s+(?:run-create|run-use|task-create|task-update|dispatch|worker-start|worker-stop|worker-abandon|worker-release|worker-retain|send|reply)|terminal\s+(?:create|send|stop|close|split))\b/i.test(command);
+      if (mutatesWorkerLifecycle) {
+        return {
+          block: true,
+          reason: "Direct Orca worker lifecycle commands bypass Minions. Use the corresponding minions_* tool.",
+        };
+      }
+    }
   });
 
   pi.on("before_agent_start", (event, ctx) => {
@@ -1412,7 +1492,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     return {
       systemPrompt: `${event.systemPrompt}
 
-Minions is strictly slash-command-only. Never infer, select, or start Minions from a natural-language request, even when the user mentions Minions, orchestration, parallel agents, or workers. Only an explicit /minions, /minions-lb, or corresponding /skill:pi-minions slash invocation authorizes minions_start; without one, perform ordinary single-agent work and never call any minions_* tool. During an authorized Minions run, call minions_start first and use only minions_* tools for orchestration. Minions owns provider affinity, role routing, budgets, board identity, and worker lifecycle. Normal minions_spawn calls must omit modelOverride; the runtime accepts it only when the raw user input explicitly requested that exact model for the next batch. In Paseo, never call MCP create_workspace and never create another Paseo Workspace for Minions. Do not call generic MCP create_agent, send_agent_prompt, or the generic subagent tool for top-level dispatch. minions_spawn creates native child agents in the caller's existing Paseo workspace. Write isolation uses linked Git worktree directories passed as worker cwd; a Git worktree is not a Paseo Workspace. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
+Minions is strictly slash-command-only. Never infer, select, or start Minions from a natural-language request, even when the user mentions Minions, orchestration, parallel agents, or workers. Only an explicit /minions, /minions-lb, or corresponding /skill:pi-minions slash invocation authorizes minions_start; without one, perform ordinary single-agent work and never call any minions_* tool. During an authorized Minions run, call minions_start first and use only minions_* tools for orchestration. Minions owns provider affinity, role routing, budgets, board identity, and worker lifecycle. Normal minions_spawn calls must omit modelOverride; the runtime accepts it only when the raw user input explicitly requested that exact model for the next batch. In Paseo, never call MCP create_workspace and never create another Paseo Workspace for Minions. Do not call generic MCP create_agent, send_agent_prompt, or the generic subagent tool for top-level dispatch. minions_spawn creates native child agents in the caller's existing Paseo workspace. In Orca-hosted Pi, minions_spawn creates native supervised Orca Tasks and Dispatches in background Pi terminals; never bypass it with direct Orca terminal, Task, Dispatch, or worker lifecycle commands. Orca writer cwd paths must be Orca-managed worktrees prepared through the Orca worktree-create command; ordinary Pi uses linked Git worktrees. You may use subagent_supervisor only to answer a managed pi-subagents worker request. After minions_spawn or minions_resume, end the turn immediately. A Paseo, Orca, or pi-subagents completion notification means you must call minions_read, update the board, and dispatch newly unblocked work.`,
     };
   });
 

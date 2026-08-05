@@ -2,7 +2,7 @@
 name: pi-minions
 description: >-
   Slash-command-only orchestrator for Pi using persistent pi-subagents or native
-  Paseo child agents. Load only after the user explicitly invokes /minions or
+  Paseo/Orca workers. Load only after the user explicitly invokes /minions or
   /skill:pi-minions; never select this skill from natural-language requests.
 ---
 
@@ -19,6 +19,11 @@ Never create another Paseo Workspace and never call generic `create_workspace` o
 `create_agent` for Minions dispatch. Use linked Git worktree directories only for
 write isolation, and pass their absolute paths to `minions_spawn` as `cwd`; a Git
 worktree is not a Paseo Workspace.
+
+In Orca-hosted Pi, every Minions worker is a native supervised Orca Dispatch in a
+background Pi terminal. Use Orca-managed worktrees for writer isolation and pass the
+absolute managed path as `cwd`. Never bypass `minions_spawn` with direct Orca terminal,
+Task, Dispatch, or worker lifecycle commands; Minions owns that native lifecycle.
 
 Read [`platform.md`](platform.md) first, then:
 

@@ -192,6 +192,7 @@ function createHarness({
   const commands = new Map();
   const handlers = new Map();
   const sentUserMessages = [];
+  const sentMessages = [];
   const modelChanges = [];
   const thinkingChanges = [];
   const notifications = [];
@@ -204,6 +205,7 @@ function createHarness({
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     sendUserMessage(message) { sentUserMessages.push(message); },
+    sendMessage(message, options) { sentMessages.push({ message, options }); },
     on(name, handler) { handlers.set(name, handler); },
     async setModel(model) {
       modelChanges.push(model);
@@ -250,6 +252,8 @@ function createHarness({
   createPiMinionsExtension(pi, {
     schemas,
     paseoHosted: false,
+    orcaHosted: false,
+    orcaRuntime: null,
     validateWriterCwd: () => true,
     resolveDiscipline: (name) => loadedDisciplines.includes(name),
     ...dependencies,
@@ -261,6 +265,7 @@ function createHarness({
     commands,
     handlers,
     sentUserMessages,
+    sentMessages,
     ctx,
     modelChanges,
     thinkingChanges,
@@ -343,6 +348,13 @@ test("start verifies pi-subagents RPC v1 before locking the frontier route", asy
 test("a Paseo-hosted Pi session fails closed when its MCP bridge was not injected", async () => {
   const harness = createHarness({ dependencies: { paseoHosted: true, paseoRuntime: null } });
   await assert.rejects(start(harness), /agent-scoped MCP runtime is unavailable.*pi-mcp-adapter/i);
+  assert.equal(harness.runtime.byMethod("ping").length, 0);
+  assert.equal(harness.modelChanges.length, 0);
+});
+
+test("an Orca-hosted Pi session fails closed when native CLI identity is unavailable", async () => {
+  const harness = createHarness({ dependencies: { orcaHosted: true, orcaRuntime: null } });
+  await assert.rejects(start(harness), /runs inside Orca.*native CLI identity.*reopen Pi/i);
   assert.equal(harness.runtime.byMethod("ping").length, 0);
   assert.equal(harness.modelChanges.length, 0);
 });
@@ -489,7 +501,7 @@ test("writer worktrees remain exclusively leased until their worker is terminal"
     task: "Implement B",
     cwd: "/repo/.worktrees/shared",
   }]);
-  assert.equal(second.details.workers[0].maxCostUsd, 15);
+  assert.equal(second.details.workers[0].maxCostUsd, 60);
   assert.equal(second.details.workers[0].maxDurationSeconds, 2700);
 });
 
@@ -660,6 +672,34 @@ test("provider and low-budget matrices are preserved through per-run model overr
   }
 });
 
+test("model-aware worker and run cost ceilings use the expanded shared budget profile", async () => {
+  const cases = [
+    { provider: "openai-codex", role: "mechanical", model: "gpt-5.6-luna", max: 24, warning: 16 },
+    { provider: "openai-codex", role: "planner", model: "gpt-5.6-terra", max: 40, warning: 24 },
+    { provider: "openai-codex", role: "reviewer", model: "gpt-5.6-sol", max: 60, warning: 40 },
+    { provider: "github-copilot", role: "explorer", model: "claude-opus-5", max: 60, warning: 40 },
+  ];
+  for (const entry of cases) {
+    const harness = createHarness({ provider: entry.provider });
+    await start(harness);
+    const spawned = await spawn(harness, [{ role: entry.role, task: entry.role }]);
+    assert.equal(spawned.details.workers[0].model, entry.model);
+    assert.equal(spawned.details.workers[0].maxCostUsd, entry.max);
+    assert.equal(spawned.details.workers[0].warningCostUsd, entry.warning);
+    assert.equal(harness.appendedEntries.at(-1).data.runCostCeilingUsd, 160);
+  }
+
+  const grok = createHarness({ provider: "github-copilot" });
+  await start(grok, "lb", "/skill:pi-minions-lb use grok-4.5 for the next batch");
+  const grokWorker = await spawn(grok, [{
+    role: "explorer",
+    task: "Bounded Grok check",
+    modelOverride: "grok-4.5",
+  }]);
+  assert.equal(grokWorker.details.workers[0].maxCostUsd, 40);
+  assert.equal(grokWorker.details.workers[0].warningCostUsd, 24);
+});
+
 test("Copilot Opus architects receive the explicit quality-route watchdog budget", async () => {
   const harness = createHarness({ provider: "github-copilot" });
   await start(harness);
@@ -668,8 +708,8 @@ test("Copilot Opus architects receive the explicit quality-route watchdog budget
     task: "Design and implement",
     cwd: "/repo/.worktrees/opus-architect",
   }]);
-  assert.equal(result.details.workers[0].maxCostUsd, 15);
-  assert.equal(result.details.workers[0].warningCostUsd, 10);
+  assert.equal(result.details.workers[0].maxCostUsd, 60);
+  assert.equal(result.details.workers[0].warningCostUsd, 40);
   assert.equal(result.details.workers[0].maxDurationSeconds, 3000);
 });
 
@@ -1295,7 +1335,7 @@ test("model-aware watchdog stops expensive Sol workers and blocks over-budget ru
         details: {
           snapshot: {
             status: "running",
-            lastUsage: { inputTokens: 100, cachedInputTokens: 1_000, outputTokens: 20, totalCostUsd: 16 },
+            lastUsage: { inputTokens: 100, cachedInputTokens: 1_000, outputTokens: 20, totalCostUsd: 61 },
           },
         },
       };
@@ -1316,7 +1356,7 @@ test("model-aware watchdog stops expensive Sol workers and blocks over-budget ru
     cwd: "/repo/.worktrees/sol",
   }]);
   const worker = spawned.details.workers[0];
-  assert.equal(worker.maxCostUsd, 15);
+  assert.equal(worker.maxCostUsd, 60);
   const read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
   assert.equal(read.details.workers[0].status, "stopping");
   assert.match(read.details.workers[0].budgetStopReason, /cost ceiling/i);
@@ -1388,6 +1428,117 @@ test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", 
   }]);
   assert.equal(incidentRegression.details.workers[0].timeoutSecondsIgnored, true);
   assert.equal(incidentRegression.details.workers[0].maxDurationSeconds, 35 * 60);
+});
+
+test("Orca sessions use native orchestration identities without dispatching pi-subagents", async () => {
+  const calls = [];
+  let dispatch = 1;
+  let state = "running";
+  const orcaRuntime = {
+    kind: "orca",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") {
+        return {
+          runtime: "orca",
+          runId: "run-orca-1",
+          methods: ["ping", "status", "spawn", "steer", "stop", "resume", "release"],
+        };
+      }
+      if (method === "spawn") {
+        return {
+          details: {
+            asyncId: `orca:dispatch-${dispatch}`,
+            runtimeAgentId: `dispatch-${dispatch++}`,
+            runtimeTerminalId: "term-worker-1",
+            runtimeTaskId: "task-1",
+          },
+        };
+      }
+      if (method === "status") {
+        return {
+          text: `State: ${state}`,
+          details: state === "complete" ? {
+            completion: {
+              id: params.runId,
+              runId: params.runId,
+              state: "complete",
+              success: true,
+              summary: "Orca worker finished",
+            },
+          } : {},
+        };
+      }
+      if (method === "resume") {
+        return {
+          details: {
+            asyncId: `orca:dispatch-${dispatch}`,
+            runtimeAgentId: `dispatch-${dispatch++}`,
+            runtimeTerminalId: params.terminalId,
+            runtimeTaskId: "task-2",
+          },
+        };
+      }
+      if (method === "steer") return { text: "Orca accepted guidance." };
+      if (method === "stop") return { state: "stopping" };
+      if (method === "release") return { state: "released" };
+      throw new Error(`Unexpected Orca method: ${method}`);
+    },
+  };
+  const harness = createHarness({ dependencies: {
+    orcaRuntime,
+    setWatchdogInterval: () => ({ unref() {} }),
+    clearWatchdogInterval: () => {},
+  } });
+  const started = await start(harness);
+  assert.equal(started.details.runtime, "orca");
+  assert.match(started.content[0].text, /Orca native orchestration/);
+  assert.equal(harness.runtime.byMethod("ping").length, 0);
+  const blockedBypass = harness.handlers.get("tool_call")({
+    toolName: "bash",
+    input: { command: "orca orchestration worker-start --task task-1 --worktree current --agent pi --json" },
+  });
+  const allowedInspection = harness.handlers.get("tool_call")({
+    toolName: "bash",
+    input: { command: "orca orchestration worker-show --dispatch dispatch-1 --json" },
+  });
+  assert.equal(blockedBypass.block, true);
+  assert.match(blockedBypass.reason, /bypass Minions/);
+  assert.equal(allowedInspection, undefined);
+
+  const spawned = await spawn(harness, [{
+    role: "explorer",
+    task: "Inspect",
+    timeoutSeconds: 30,
+  }]);
+  const worker = spawned.details.workers[0];
+  assert.equal(worker.runtimeAgentId, "dispatch-1");
+  assert.equal(worker.runtimeTerminalId, "term-worker-1");
+  assert.equal(worker.runtimeTaskId, "task-1");
+  assert.equal(worker.timeoutSecondsIgnored, true);
+  assert.match(spawned.content[0].text, /Ignored timeoutSeconds for 1 Orca worker/);
+  const persisted = harness.appendedEntries.at(-1).data;
+  assert.equal(persisted.runtime, "orca");
+  assert.equal(persisted.runtimeRunId, "run-orca-1");
+  assert.equal(harness.runtime.byMethod("spawn").length, 0);
+
+  state = "complete";
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.details.workers[0].status, "done");
+  assert.match(read.content[0].text, /Orca worker finished/);
+  const statusCall = calls.find((call) => call.method === "status");
+  assert.equal(statusCall.params.id, "dispatch-1");
+  assert.equal(statusCall.params.terminalId, "term-worker-1");
+
+  const resumed = await execute(harness.tools.get("minions_resume"), {
+    workerId: worker.id,
+    message: "Continue",
+  }, harness.ctx);
+  assert.equal(resumed.details.worker.runtimeAgentId, "dispatch-2");
+  assert.equal(resumed.details.worker.runtimeTerminalId, "term-worker-1");
+  const resumeCall = calls.find((call) => call.method === "resume");
+  assert.equal(resumeCall.params.agent, "pi-minions-explorer");
+  assert.equal(resumeCall.params.model, "openai-codex/gpt-5.6-luna:high");
 });
 
 test("Paseo sessions use native child agents without dispatching pi-subagents", async () => {

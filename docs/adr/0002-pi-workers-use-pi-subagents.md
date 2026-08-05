@@ -4,7 +4,8 @@
 
 Accepted on the experimental `agent/use-pi-subagents-runtime` branch. This
 supersedes ADR 0001 for ordinary Pi sessions. Paseo-hosted Pi is complemented by
-[ADR 0003](0003-paseo-hosted-pi-uses-native-agents.md).
+[ADR 0003](0003-paseo-hosted-pi-uses-native-agents.md), and Orca-hosted Pi by
+[ADR 0004](0004-orca-hosted-pi-uses-native-orchestration.md).
 
 ## Context
 
