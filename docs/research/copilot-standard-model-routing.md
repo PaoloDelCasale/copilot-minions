@@ -144,11 +144,11 @@ saves where verification contains the risk:
 
 1. Sol remains the frontier and review/escalation model.
 2. Opus high handles read-only exploration; Opus xhigh is reserved for architecture.
-   Both receive a $10 warning, $15 stop, and 50-minute watchdog.
+   Both receive a $40 warning, $60 stop, and 50-minute watchdog.
 3. Terra max carries implementation and planning instead of Sol max.
 4. Luna high carries bounded mechanical work.
-5. The $40 default run ceiling, verification gate, fresh reviewer, six-worker limit,
-   and no-fallback preflight remain unchanged.
+5. The $160 default run ceiling, verification gate, fresh reviewer, six-worker limit,
+   and no-fallback preflight bound the quality-first profile.
 
 As an illustration only, applying the AA average task costs to a ten-worker mix of
 two mechanical, two explorer, three implementer, one architect, one reviewer, and one

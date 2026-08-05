@@ -1,7 +1,7 @@
 # copilot-minions
 
 Multi-platform orchestration skills for **GitHub Copilot CLI**, **OpenAI Codex**,
-**Pi**, and **Paseo-hosted Pi**. A dispatch-only frontier coordinates bounded workers through a shared
+**Pi**, **Paseo-hosted Pi**, and **Orca-hosted Pi**. A dispatch-only frontier coordinates bounded workers through a shared
 board and STATUS protocol. Workers implement, explore, review, plan, and run commands
 in isolated worktrees.
 
@@ -16,8 +16,12 @@ The methodology is shared; only platform capabilities differ:
 - When Pi runs as a Paseo agent, the same extension selects Paseo's agent-scoped MCP
   instead. Workers are native Paseo child agents, visible in its subagent track, and
   Paseo owns their lifecycle, activity, persistence, usage, and notifications.
+- When Pi runs in an Orca agent terminal, the extension selects Orca's public native
+  orchestration CLI. Workers become supervised Orca Tasks and Dispatches in background
+  Pi terminals, with Orca-native worktree placement, status, stop, follow-up, and
+  archived output.
 
-Codex, Pi, and Paseo support are **beta** until their authenticated release gates pass.
+Codex, Pi, Paseo, and Orca support are **beta** until their authenticated release gates pass.
 
 ## Install
 
@@ -196,7 +200,9 @@ try {
 Codex installation requires `codex` on `PATH` and runs `codex debug models` before
 writing files. It requires Sol and Luna, plus Terra for the standard variant. Pi
 and Paseo installation require `pi` on `PATH` without requiring model
-availability. `-Platform pi` installs pinned `npm:pi-subagents@0.37.2`;
+availability. Orca-hosted Pi uses the normal Pi installation; a complete Orca
+terminal identity selects native orchestration automatically, so no private Orca
+package is installed. `-Platform pi` installs pinned `npm:pi-subagents@0.37.2`;
 `-Platform paseo` installs pinned `npm:pi-mcp-adapter@2.16.0`; `all` installs both.
 The MCP adapter is the bridge Paseo probes before injecting its agent-scoped
 `create_agent` control plane into Pi. A Paseo-hosted session fails closed
@@ -267,7 +273,7 @@ failure condition. An initial or merely complex task cannot self-promote to Sol.
 invalid override is audited and downgraded to the normal role route rather than
 failing the spawn, preventing retry loops from mutating semantic roles.
 
-### Pi provider affinity and Paseo runtime selection
+### Pi provider affinity and native-host runtime selection
 
 Starting either Pi skill captures the parent provider. Only `openai-codex` and
 `github-copilot` are accepted. The frontier switches to
@@ -280,7 +286,7 @@ availability fallback. Installation does
 not require those models to be available. Closing the run restores the parent's
 original model and thinking level.
 
-Outside Paseo, workers use namespaced `pi-subagents` agents and explicit
+Outside Paseo and Orca, workers use namespaced `pi-subagents` agents and explicit
 provider-qualified model routes. `pi-subagents` owns process lifecycle, FleetView,
 artifacts, session recovery, supervisor communication, steering, timeout enforcement,
 and completion notifications. In a Paseo agent-scoped session, Minions discovers the
@@ -310,16 +316,29 @@ exclusive canonical-path lease until the writer is terminal. A Paseo failure rem
 provisional for two minutes so automatic retry or compaction cannot release that
 lease prematurely, and provisional workers remain explicitly stoppable.
 
-Paseo runs also have a live model-aware watchdog. Defaults are Luna `$4` warning / `$6`
-stop / 30 minutes, Sol `$10` / `$15` / 45 minutes, Terra or Grok `$6` / `$10` /
-35 minutes, and Opus 5 `$10` / `$15` / 50 minutes. The run warns at 75% of its
-default `$40` ceiling and blocks new dispatch
-at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` allow explicit
-overrides. A watchdog stop retains worker and worktree ownership until Paseo confirms
-the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
+Every Pi runtime uses the same model-aware budget profile. Defaults are Luna `$16`
+warning / `$24` stop / 30 minutes, Sol `$40` / `$60` / 45 minutes, Terra or Grok
+`$24` / `$40` / 35 minutes, and Opus 5 `$40` / `$60` / 50 minutes. Where the runtime
+exposes normalized live usage, the run warns at 75% of its default `$160` ceiling and
+blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` allow explicit
+overrides. A watchdog stop retains worker and worktree ownership until the native host
+confirms the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
 with `minions_close` flushing unread completion usage. Missed notifications are
-reconciled from the package's persistent lifecycle v3 artifact. Outside Paseo,
-`timeoutSeconds` maps to the package-owned persistent deadline.
+reconciled from the package's persistent lifecycle v3 artifact. Outside native hosts,
+`timeoutSeconds` maps to the package-owned persistent deadline. Orca's current CLI
+surface does not expose normalized token/cost usage, so Orca enforces duration ceilings
+while cost ceilings remain unavailable. Ordinary Pi reports finalized package cost but
+has no package-owned live cost-ceiling parameter; Paseo currently supports live duration
+and cost enforcement.
+
+In an Orca agent terminal, the same runtime seam creates a native Orca Run, one Task
+per Minions assignment, an exactly routed background Pi terminal, and an injected
+Dispatch. `worker-show`, `worker-read`, `worker-stop`, interrupt input, and terminal
+transfer on follow-up back `minions_read`, `minions_stop`, `minions_steer`, and
+`minions_resume`. Writer `cwd` paths must be Orca-managed worktrees prepared through
+`orca worktree create`; raw linked worktrees cannot host native Orca terminals. The
+adapter is selected only from a complete Orca agent identity and fails closed on a
+partial identity. See [ADR 0004](docs/adr/0004-orca-hosted-pi-uses-native-orchestration.md).
 
 ### Low-budget stack
 
@@ -367,8 +386,9 @@ skills/
   pi-minions/              Pi entrypoint and RPC adapter
   pi-minions-lb/           Pi low-budget entrypoint and RPC adapter
 extensions/
-  pi-minions/              Provider-affine runtime seam for pi-subagents and Paseo
+  pi-minions/              Provider-affine runtime seam for pi-subagents, Paseo, and Orca
     paseo-runtime.mjs      Paseo MCP discovery, transport, and lifecycle adapter
+    orca-runtime.mjs       Orca CLI discovery and native orchestration adapter
     agents/                Managed Pi role agents and two-axis review leaf
 ```
 
@@ -424,6 +444,9 @@ IDs and a real native-subagent orchestration cycle. Pi remains beta until real
 `pi-subagents` orchestration and resume runs pass with both `openai-codex` and
 `github-copilot`. Paseo support additionally requires an authenticated Paseo-hosted
 Pi run covering native child visibility, completion notification, stop, and follow-up.
+Orca support requires an authenticated Orca-hosted Pi run covering native Run/Task/
+Dispatch visibility, managed writer worktrees, completion wake-up, steering, stop,
+reload, follow-up terminal reuse, release, and archived output.
 
 ## License
 

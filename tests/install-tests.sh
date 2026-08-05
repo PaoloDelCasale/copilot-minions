@@ -170,6 +170,7 @@ grep -Fq 'Triage: 30/30' "${PI_SKILL}/control.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
 grep -Fq 'budgetClass: "closure"' "${PI_SKILL}/platform.md"
 [[ -f "${PI_EXTENSION}/index.ts" ]]
+[[ -f "${PI_EXTENSION}/orca-runtime.mjs" ]]
 [[ -f "${PI_AGENTS}/pi-minions-reviewer.md" ]]
 [[ -f "${PI_AGENTS}/pi-minions-review-axis.md" ]]
 [[ "$(count_files "${PI_AGENTS}"/pi-minions-*.md)" -eq 7 ]]
@@ -247,6 +248,7 @@ PASEO_PROJECT_EXTENSION="${PASEO_PROJECT}/.pi/extensions/pi-minions"
 PASEO_PROJECT_SKILL="${PASEO_PROJECT}/.pi/skills/pi-minions"
 PASEO_PROJECT_LB_SKILL="${PASEO_PROJECT}/.pi/skills/pi-minions-lb"
 [[ -f "${PASEO_PROJECT_EXTENSION}/index.ts" ]]
+[[ -f "${PASEO_PROJECT_EXTENSION}/orca-runtime.mjs" ]]
 [[ -f "${PASEO_PROJECT_EXTENSION}/agents/pi-minions-reviewer.md" ]]
 [[ "$(count_files "${PASEO_PROJECT_EXTENSION}"/agents/pi-minions-*.md)" -eq 7 ]]
 [[ -f "${PASEO_PROJECT_SKILL}/control.md" ]]
@@ -285,6 +287,7 @@ PI_PROJECT_EXTENSION="${PI_PROJECT}/.pi/extensions/pi-minions"
 PI_PROJECT_SKILL="${PI_PROJECT}/.pi/skills/pi-minions"
 PI_PROJECT_AGENTS="${PI_PROJECT}/.pi/agents/copilot-minions"
 [[ -f "${PI_PROJECT_EXTENSION}/index.ts" ]]
+[[ -f "${PI_PROJECT_EXTENSION}/orca-runtime.mjs" ]]
 [[ -f "${PI_PROJECT_SKILL}/SKILL.md" ]]
 [[ -f "${PI_PROJECT_SKILL}/scripts/update-disciplines.sh" ]]
 [[ ! -e "${PI_PROJECT}/.pi/skills/pi-minions-lb" ]]
