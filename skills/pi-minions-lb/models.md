@@ -11,14 +11,16 @@ than substituting another model.
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| `mechanical` | `gpt-5.6-luna` | low |
-| `explorer` | `gpt-5.6-luna` | medium |
-| `implementer` | `gpt-5.6-luna` | high |
-| `architect` | `gpt-5.6-luna` | high |
+| `mechanical` | `gpt-5.6-luna` | high |
+| `explorer` | `gpt-5.6-luna` | max |
+| `implementer` | `gpt-5.6-luna` | max |
+| `architect` | `gpt-5.6-luna` | max |
 | `reviewer` | `gpt-5.6-sol` | low |
-| `planner` | `gpt-5.6-luna` | high |
+| `planner` | `gpt-5.6-luna` | max |
 
-Overrides: `mechanical-judgment` and `escalate-entry` use `gpt-5.6-luna:xhigh`;
+These role routes mirror the GitHub Copilot low-budget profile. Overrides:
+`mechanical-judgment` uses `gpt-5.6-luna:max`; `escalate-entry` retains
+`gpt-5.6-luna:xhigh` instead of the Copilot-only Grok route;
 `escalate-sol-low` uses `gpt-5.6-sol:low`; `escalate-sol-medium` uses
 `gpt-5.6-sol:medium`.
 

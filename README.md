@@ -317,8 +317,8 @@ provisional for two minutes so automatic retry or compaction cannot release that
 lease prematurely, and provisional workers remain explicitly stoppable.
 
 Every Pi runtime uses the same model-aware budget profile. Defaults are Luna `$16`
-warning / `$24` stop / 30 minutes, Sol `$40` / `$60` / 45 minutes, Terra or Grok
-`$24` / `$40` / 35 minutes, and Opus 5 `$40` / `$60` / 50 minutes. Where the runtime
+warning / `$24` stop / 60 minutes, Sol `$40` / `$60` / 90 minutes, Terra or Grok
+`$24` / `$40` / 70 minutes, and Opus 5 `$40` / `$60` / 100 minutes. Where the runtime
 exposes normalized live usage, the run warns at 75% of its default `$160` ceiling and
 blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` may explicitly
 raise these safety floors; lower payload values are clamped to the model/run defaults.
@@ -354,9 +354,8 @@ OpenAI Codex (native and Pi):
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| Mechanical | `gpt-5.6-luna` | low |
-| Explorer | `gpt-5.6-luna` | medium |
-| Implementer / architect / planner | `gpt-5.6-luna` | high |
+| Mechanical | `gpt-5.6-luna` | high |
+| Explorer / implementer / architect / planner | `gpt-5.6-luna` | max |
 | Reviewer | `gpt-5.6-sol` | low |
 
 GitHub Copilot (native and Pi):
@@ -368,8 +367,9 @@ GitHub Copilot (native and Pi):
 | Explorer / implementer / architect / planner | `gpt-5.6-luna` | max |
 | Reviewer | `gpt-5.6-sol` | low |
 
-The Copilot LB profile tries Luna first and reserves `grok-4.5:high` for the
-first evidence-backed escalation. This materially reduces expected spend while Sol
+Both LB profiles share these role routes. The Copilot LB profile reserves
+`grok-4.5:high` for the first evidence-backed escalation; Codex retains
+`gpt-5.6-luna:xhigh` for that override. This materially reduces expected spend while Sol
 low keeps review independent. See
 `docs/research/copilot-low-budget-model-routing.md` for the benchmark and pricing
 rationale. Unlike the source configuration, LB does not add a

@@ -502,7 +502,7 @@ test("writer worktrees remain exclusively leased until their worker is terminal"
     cwd: "/repo/.worktrees/shared",
   }]);
   assert.equal(second.details.workers[0].maxCostUsd, 60);
-  assert.equal(second.details.workers[0].maxDurationSeconds, 2700);
+  assert.equal(second.details.workers[0].maxDurationSeconds, 5400);
 });
 
 test("spawn preflights the entire batch before starting any child", async () => {
@@ -646,7 +646,12 @@ test("a partially failed RPC batch retains every launched child through terminal
 
 test("provider and low-budget matrices are preserved through per-run model overrides", async () => {
   const cases = [
-    { provider: "openai-codex", variant: "lb", role: "architect", expected: "openai-codex/gpt-5.6-luna:high" },
+    { provider: "openai-codex", variant: "lb", role: "mechanical", expected: "openai-codex/gpt-5.6-luna:high" },
+    { provider: "openai-codex", variant: "lb", role: "explorer", expected: "openai-codex/gpt-5.6-luna:max" },
+    { provider: "openai-codex", variant: "lb", role: "implementer", expected: "openai-codex/gpt-5.6-luna:max" },
+    { provider: "openai-codex", variant: "lb", role: "architect", expected: "openai-codex/gpt-5.6-luna:max" },
+    { provider: "openai-codex", variant: "lb", role: "reviewer", expected: "openai-codex/gpt-5.6-sol:low" },
+    { provider: "openai-codex", variant: "lb", role: "planner", expected: "openai-codex/gpt-5.6-luna:max" },
     { provider: "github-copilot", variant: "standard", role: "mechanical", expected: "github-copilot/gpt-5.6-luna:high" },
     { provider: "github-copilot", variant: "standard", role: "explorer", expected: "github-copilot/claude-opus-5:high" },
     { provider: "github-copilot", variant: "standard", role: "implementer", expected: "github-copilot/gpt-5.6-terra:max" },
@@ -674,10 +679,10 @@ test("provider and low-budget matrices are preserved through per-run model overr
 
 test("model-aware worker and run cost ceilings use the expanded shared budget profile", async () => {
   const cases = [
-    { provider: "openai-codex", role: "mechanical", model: "gpt-5.6-luna", max: 24, warning: 16 },
-    { provider: "openai-codex", role: "planner", model: "gpt-5.6-terra", max: 40, warning: 24 },
-    { provider: "openai-codex", role: "reviewer", model: "gpt-5.6-sol", max: 60, warning: 40 },
-    { provider: "github-copilot", role: "explorer", model: "claude-opus-5", max: 60, warning: 40 },
+    { provider: "openai-codex", role: "mechanical", model: "gpt-5.6-luna", max: 24, warning: 16, duration: 60 * 60 },
+    { provider: "openai-codex", role: "planner", model: "gpt-5.6-terra", max: 40, warning: 24, duration: 70 * 60 },
+    { provider: "openai-codex", role: "reviewer", model: "gpt-5.6-sol", max: 60, warning: 40, duration: 90 * 60 },
+    { provider: "github-copilot", role: "explorer", model: "claude-opus-5", max: 60, warning: 40, duration: 100 * 60 },
   ];
   for (const entry of cases) {
     const harness = createHarness({ provider: entry.provider });
@@ -686,6 +691,7 @@ test("model-aware worker and run cost ceilings use the expanded shared budget pr
     assert.equal(spawned.details.workers[0].model, entry.model);
     assert.equal(spawned.details.workers[0].maxCostUsd, entry.max);
     assert.equal(spawned.details.workers[0].warningCostUsd, entry.warning);
+    assert.equal(spawned.details.workers[0].maxDurationSeconds, entry.duration);
     assert.equal(harness.appendedEntries.at(-1).data.runCostCeilingUsd, 160);
   }
 
@@ -698,6 +704,7 @@ test("model-aware worker and run cost ceilings use the expanded shared budget pr
   }]);
   assert.equal(grokWorker.details.workers[0].maxCostUsd, 40);
   assert.equal(grokWorker.details.workers[0].warningCostUsd, 24);
+  assert.equal(grokWorker.details.workers[0].maxDurationSeconds, 70 * 60);
 });
 
 test("frontier payloads cannot shrink the shared cost or duration safety floors", async () => {
@@ -715,7 +722,7 @@ test("frontier payloads cannot shrink the shared cost or duration safety floors"
   }]);
   assert.equal(result.details.workers[0].maxCostUsd, 24);
   assert.equal(result.details.workers[0].warningCostUsd, 16);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 1800);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 3600);
   assert.equal(harness.appendedEntries.at(-1).data.runCostCeilingUsd, 160);
 });
 
@@ -729,7 +736,7 @@ test("Copilot Opus architects receive the explicit quality-route watchdog budget
   }]);
   assert.equal(result.details.workers[0].maxCostUsd, 60);
   assert.equal(result.details.workers[0].warningCostUsd, 40);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 3000);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 6000);
 });
 
 test("named escalation routes retain their provider-specific model and effort", async () => {
@@ -775,6 +782,34 @@ test("named escalation routes retain their provider-specific model and effort", 
   assert.deepEqual(
     copilot.runtime.byMethod("spawn").slice(-2).map((call) => call.params.model),
     ["github-copilot/gpt-5.6-terra:max", "github-copilot/gpt-5.6-sol:high"],
+  );
+});
+
+test("Codex low-budget mirrors Copilot roles but keeps its Luna escalation", async () => {
+  const harness = createHarness({ provider: "openai-codex" });
+  await start(harness, "lb");
+  const prior = await spawn(harness, [{ role: "explorer", task: "Initial Luna discovery" }]);
+  harness.runtime.complete(prior.details.workers[0].subagentRunId, {
+    success: false,
+    state: "failed",
+    summary: "STATUS: BLOCKED\nLuna could not resolve repository context.",
+  });
+  await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  await spawn(harness, [{
+    role: "mechanical",
+    task: "Resolve merge conflict",
+    routeOverride: "mechanical-judgment",
+    overrideReason: "merge-conflict",
+  }, {
+    role: "explorer",
+    task: "Escalate repository discovery",
+    routeOverride: "escalate-entry",
+    overrideReason: "blocked",
+    overrideFromWorkerId: prior.details.workers[0].id,
+  }]);
+  assert.deepEqual(
+    harness.runtime.byMethod("spawn").slice(-2).map((call) => call.params.model),
+    ["openai-codex/gpt-5.6-luna:max", "openai-codex/gpt-5.6-luna:xhigh"],
   );
 });
 
@@ -1435,7 +1470,7 @@ test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", 
   assert.equal(Object.hasOwn(spawnCall.params, "timeoutMs"), false);
   assert.equal(result.details.workers[0].timeoutSeconds, 900);
   assert.equal(result.details.workers[0].timeoutSecondsIgnored, true);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 35 * 60);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 70 * 60);
   assert.match(result.content[0].text, /Ignored timeoutSeconds for 1 Paseo worker/);
   assert.match(result.content[0].text, /Do not retry with timeoutSeconds/);
 
@@ -1446,7 +1481,7 @@ test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", 
     timeoutSeconds: 30,
   }]);
   assert.equal(incidentRegression.details.workers[0].timeoutSecondsIgnored, true);
-  assert.equal(incidentRegression.details.workers[0].maxDurationSeconds, 35 * 60);
+  assert.equal(incidentRegression.details.workers[0].maxDurationSeconds, 70 * 60);
 });
 
 test("Orca sessions use native orchestration identities without dispatching pi-subagents", async () => {

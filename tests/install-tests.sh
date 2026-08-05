@@ -203,7 +203,10 @@ export MINIONS_TEST_MODELS=lb
 bash "${ROOT}/install.sh" --platform codex --variant lb >/dev/null
 CODEX_LB_SKILL="${MINIONS_HOME}/.agents/skills/codex-minions-lb"
 [[ -f "${CODEX_LB_SKILL}/models.md" ]]
-grep -Eq 'explorer.*gpt-5.6-luna.*medium' "${CODEX_LB_SKILL}/models.md"
+grep -Eq 'mechanical.*gpt-5.6-luna.*high' "${CODEX_LB_SKILL}/models.md"
+grep -Eq 'explorer.*gpt-5.6-luna.*max' "${CODEX_LB_SKILL}/models.md"
+grep -Eq 'architect.*gpt-5.6-luna.*max' "${CODEX_LB_SKILL}/models.md"
+! grep -Fq 'grok-4.5' "${CODEX_LB_SKILL}/models.md"
 
 export MINIONS_TEST_MODELS=complete
 bash "${ROOT}/install.sh" --platform all --variant all >/dev/null
