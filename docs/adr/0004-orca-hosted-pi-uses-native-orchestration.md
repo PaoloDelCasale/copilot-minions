@@ -36,17 +36,21 @@ For every initial worker it:
 1. verifies that `cwd` is an Orca-managed worktree;
 2. creates a native Orca Task containing the Minions role and assignment contract;
 3. creates a background Pi terminal with the exact provider/model/thinking route;
-4. waits for the Pi TUI to become ready;
+4. waits for the Pi TUI to become ready, then retries only Orca's transient
+   `agent_unconfigured` result while the agent hook finishes registration;
 5. attaches that terminal with `worker-start --terminal`, creating a supervised native
-   Orca Dispatch whose status, output, stop, and release APIs remain available.
+   Orca Dispatch whose status, output, and stop APIs remain available.
 
 The adapter maps the Dispatch ID, terminal handle, and Task ID to one Minions worker.
 Status and output come from `worker-show` and `worker-read`; steering uses interrupt
 input to the exact worker terminal; stop uses `worker-stop`. Resume creates a fresh
 Task and transfers the same terminal to a new Dispatch, preserving both the Pi session
-and Minions worker identity. `minions_close` releases settled worker terminals through
-`worker-release`, leaving Orca's output archives available. Compatibility recovery
-also recognizes Tasks created by the earlier low-level `dispatch --inject` prototype,
+and Minions worker identity. Because an exactly routed terminal exists before
+`worker-start`, Orca correctly classifies it as external/reused and does not own its
+process cleanup. `minions_close` therefore asks `worker-release` for archive/accounting
+first and closes the exact recorded terminal when Orca returns `retained`; stopped or
+already-gone terminals are idempotent cleanup success. Compatibility recovery also
+recognizes Tasks created by the earlier low-level `dispatch --inject` prototype,
 reconciles their terminal result from Task/Dispatch state, and closes their exact
 terminal during release.
 

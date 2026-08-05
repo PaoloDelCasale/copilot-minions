@@ -336,7 +336,9 @@ In an Orca agent terminal, the same runtime seam creates a native Orca Run, one 
 per Minions assignment, an exactly routed background Pi terminal, and an injected
 Dispatch. `worker-show`, `worker-read`, `worker-stop`, interrupt input, and terminal
 transfer on follow-up back `minions_read`, `minions_stop`, `minions_steer`, and
-`minions_resume`. Writer `cwd` paths must be Orca-managed worktrees prepared through
+`minions_resume`. Initial attachment tolerates the bounded agent-hook registration
+race, and close explicitly cleans retained/stopped external terminals by their recorded
+handle. Writer `cwd` paths must be Orca-managed worktrees prepared through
 `orca worktree create`; raw linked worktrees cannot host native Orca terminals. The
 adapter is selected only from a complete Orca agent identity and fails closed on a
 partial identity. See [ADR 0004](docs/adr/0004-orca-hosted-pi-uses-native-orchestration.md).
