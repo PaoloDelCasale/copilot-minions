@@ -39,7 +39,7 @@ export const schemas = {
     maxRunCostUsd: Type.Optional(Type.Number({
       exclusiveMinimum: 0,
       maximum: 500,
-      description: "Optional run-wide cost ceiling; defaults to 160 USD.",
+      description: "Optional run-wide cost ceiling; defaults to 160 USD and may only be raised.",
     })),
   }),
   spawn: Type.Object({
@@ -73,12 +73,12 @@ export const schemas = {
       maxCostUsd: Type.Optional(Type.Number({
         exclusiveMinimum: 0,
         maximum: 100,
-        description: "Optional worker cost ceiling; defaults are model-aware.",
+        description: "Optional worker cost ceiling; model-aware defaults are safety floors and may only be raised.",
       })),
       maxDurationSeconds: Type.Optional(Type.Integer({
         minimum: 60,
         maximum: 14400,
-        description: "Optional model-aware worker wall-clock watchdog; this is the only duration field to use on native Paseo or Orca runtimes.",
+        description: "Optional model-aware worker wall-clock watchdog; defaults are safety floors and may only be raised. This is the only duration field to use on native Paseo or Orca runtimes.",
       })),
     }), { minItems: 1, maxItems: 6 }),
   }),

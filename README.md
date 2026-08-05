@@ -320,8 +320,9 @@ Every Pi runtime uses the same model-aware budget profile. Defaults are Luna `$1
 warning / `$24` stop / 30 minutes, Sol `$40` / `$60` / 45 minutes, Terra or Grok
 `$24` / `$40` / 35 minutes, and Opus 5 `$40` / `$60` / 50 minutes. Where the runtime
 exposes normalized live usage, the run warns at 75% of its default `$160` ceiling and
-blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` allow explicit
-overrides. A watchdog stop retains worker and worktree ownership until the native host
+blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` may explicitly
+raise these safety floors; lower payload values are clamped to the model/run defaults.
+A watchdog stop retains worker and worktree ownership until the native host
 confirms the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
 with `minions_close` flushing unread completion usage. Missed notifications are
 reconciled from the package's persistent lifecycle v3 artifact. Outside native hosts,

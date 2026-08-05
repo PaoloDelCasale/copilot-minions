@@ -698,17 +698,18 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const discipline = requestedDiscipline(spec.task);
     const disciplineLoaded = Boolean(discipline && resolveDiscipline(discipline, cwd));
     const budget = MODEL_BUDGETS[modelId] ?? MODEL_BUDGETS["gpt-5.6-terra"];
-    const maxDurationSeconds = spec.maxDurationSeconds ?? budget.maxDurationSeconds;
+    const maxCostUsd = Math.max(spec.maxCostUsd ?? budget.maxCostUsd, budget.maxCostUsd);
+    const maxDurationSeconds = Math.max(spec.maxDurationSeconds ?? budget.maxDurationSeconds, budget.maxDurationSeconds);
     const timeoutSecondsIgnored = run.runtime !== "pi-subagents" && spec.timeoutSeconds !== undefined;
     return {
       modelId,
       thinking,
       cwd,
       canonicalCwd: normalizeGitPath("/", cwd),
-      maxCostUsd: spec.maxCostUsd ?? budget.maxCostUsd,
-      warningCostUsd: spec.maxCostUsd === undefined
+      maxCostUsd,
+      warningCostUsd: maxCostUsd === budget.maxCostUsd
         ? budget.warningCostUsd
-        : Math.round(spec.maxCostUsd * 0.67 * 100) / 100,
+        : Math.round(maxCostUsd * 0.67 * 100) / 100,
       maxDurationSeconds,
       timeoutSecondsIgnored,
       agent: ROLE_AGENTS[spec.role],
@@ -1106,7 +1107,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         nextWorkerNumber: 1,
         launchCount: 0,
         triagedCount: 0,
-        runCostCeilingUsd: params.maxRunCostUsd ?? runCostCeilingUsd,
+        runCostCeilingUsd: Math.max(params.maxRunCostUsd ?? runCostCeilingUsd, runCostCeilingUsd),
         runBudgetWarningSent: false,
         modelOverrideAuthorizations: new Set(pendingModelOverrideAuthorizations),
       };

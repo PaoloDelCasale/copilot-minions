@@ -51,8 +51,10 @@ do not expose a package-owned persistent child deadline through this adapter, so
 watchdog. The runtime ignores and reports an accidental native-host `timeoutSeconds`
 value; it never lets that ordinary-Pi field shorten the watchdog. Treat that warning
 as a payload bug and omit the field on the next spawn, rather than retrying the worker
-or changing its role. Orca currently reports duration and terminal lifecycle but not
-normalized token/cost usage, so its watchdog enforces duration while Orca owns worker
+or changing its role. Worker/run cost ceilings and native duration watchdogs are safety
+floors: optional payloads may raise but never lower their defaults. Orca currently
+reports duration and terminal lifecycle but not normalized token/cost usage, so its
+watchdog enforces duration while Orca owns worker
 visibility and output archives. Omit `modelOverride`
 entirely unless raw user input explicitly requested that exact model for the next
 batch; never pass an empty string.

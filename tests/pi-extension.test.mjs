@@ -700,6 +700,25 @@ test("model-aware worker and run cost ceilings use the expanded shared budget pr
   assert.equal(grokWorker.details.workers[0].warningCostUsd, 24);
 });
 
+test("frontier payloads cannot shrink the shared cost or duration safety floors", async () => {
+  const harness = createHarness({ provider: "github-copilot" });
+  harness.handlers.get("input")({ source: "interactive", text: "/skill:pi-minions" });
+  await execute(harness.tools.get("minions_start"), {
+    variant: "standard",
+    maxRunCostUsd: 10,
+  }, harness.ctx);
+  const result = await spawn(harness, [{
+    role: "mechanical",
+    task: "Read-only smoke test",
+    maxCostUsd: 1,
+    maxDurationSeconds: 600,
+  }]);
+  assert.equal(result.details.workers[0].maxCostUsd, 24);
+  assert.equal(result.details.workers[0].warningCostUsd, 16);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 1800);
+  assert.equal(harness.appendedEntries.at(-1).data.runCostCeilingUsd, 160);
+});
+
 test("Copilot Opus architects receive the explicit quality-route watchdog budget", async () => {
   const harness = createHarness({ provider: "github-copilot" });
   await start(harness);
@@ -1416,7 +1435,7 @@ test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", 
   assert.equal(Object.hasOwn(spawnCall.params, "timeoutMs"), false);
   assert.equal(result.details.workers[0].timeoutSeconds, 900);
   assert.equal(result.details.workers[0].timeoutSecondsIgnored, true);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 1800);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 35 * 60);
   assert.match(result.content[0].text, /Ignored timeoutSeconds for 1 Paseo worker/);
   assert.match(result.content[0].text, /Do not retry with timeoutSeconds/);
 

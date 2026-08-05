@@ -15,9 +15,10 @@ Orca injects an authenticated terminal/worktree identity through `ORCA_*` enviro
 variables.
 
 Minions must preserve provider affinity and exact model/thinking routes. Orca's
-high-level `worker-start --agent pi` launcher does not accept a Pi model route, while
-the supported low-level composition permits a custom Pi command followed by an
-injected native Dispatch.
+high-level `worker-start --agent pi` launcher does not accept a Pi model route. The
+supported composition therefore creates an exactly routed Pi terminal first and then
+passes that terminal to `worker-start --terminal`, which registers the Dispatch in
+Orca's supervised-worker lifecycle.
 
 ## Decision
 
@@ -36,14 +37,18 @@ For every initial worker it:
 2. creates a native Orca Task containing the Minions role and assignment contract;
 3. creates a background Pi terminal with the exact provider/model/thinking route;
 4. waits for the Pi TUI to become ready;
-5. injects a native Orca Dispatch so the worker reports `worker_done` through Orca.
+5. attaches that terminal with `worker-start --terminal`, creating a supervised native
+   Orca Dispatch whose status, output, stop, and release APIs remain available.
 
 The adapter maps the Dispatch ID, terminal handle, and Task ID to one Minions worker.
 Status and output come from `worker-show` and `worker-read`; steering uses interrupt
 input to the exact worker terminal; stop uses `worker-stop`. Resume creates a fresh
 Task and transfers the same terminal to a new Dispatch, preserving both the Pi session
 and Minions worker identity. `minions_close` releases settled worker terminals through
-`worker-release`, leaving Orca's output archives available.
+`worker-release`, leaving Orca's output archives available. Compatibility recovery
+also recognizes Tasks created by the earlier low-level `dispatch --inject` prototype,
+reconciles their terminal result from Task/Dispatch state, and closes their exact
+terminal during release.
 
 The existing Minions watchdog polls native status while the parent is idle and wakes
 the Pi frontier when a worker becomes terminal. Orca currently does not expose a

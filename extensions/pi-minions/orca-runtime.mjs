@@ -132,6 +132,11 @@ function resultId(result, ...paths) {
   return undefined;
 }
 
+function hasOrcaErrorCode(error, code) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(`(${code})`) || message.includes(` ${code}:`) || message.includes(` ${code} `);
+}
+
 function parseMaybeJson(value) {
   if (typeof value !== "string") return value;
   try {
@@ -239,6 +244,32 @@ export function createOrcaRuntime({
     }
   }
 
+  async function readLegacyDispatch(taskId) {
+    const [dispatchResult, taskResult] = await Promise.all([
+      callOrca(["orchestration", "dispatch-show", "--task", taskId]),
+      callOrca(["orchestration", "task-list", "--run", activeRunId]),
+    ]);
+    const task = (taskResult?.tasks ?? []).find((candidate) => candidate?.id === taskId);
+    if (!dispatchResult?.dispatch || !task) return undefined;
+    return {
+      dispatch: dispatchResult.dispatch,
+      task,
+      worker: { state: task.status },
+      legacyLowLevelDispatch: true,
+    };
+  }
+
+  async function showWorker(params) {
+    try {
+      return await callOrca(["orchestration", "worker-show", "--dispatch", params.id]);
+    } catch (error) {
+      if (!params.taskId || !hasOrcaErrorCode(error, "dispatch_not_found")) throw error;
+      const legacy = await readLegacyDispatch(params.taskId);
+      if (!legacy) throw error;
+      return legacy;
+    }
+  }
+
   async function failUndispatchedTask(taskId, terminalId, reason) {
     if (terminalId) {
       try {
@@ -291,7 +322,7 @@ export function createOrcaRuntime({
       if (method === "spawn") {
         let taskId;
         let terminalId;
-        let dispatchAttempted = false;
+        let workerStartAttempted = false;
         try {
           await callOrca(["worktree", "show", "--worktree", `path:${params.cwd}`]);
           taskId = await createTask(params);
@@ -310,16 +341,18 @@ export function createOrcaRuntime({
             "--timeout-ms", String(readyTimeoutMs),
           ], { timeoutMs: readyTimeoutMs + 10_000 });
           if (ready?.wait?.satisfied === false) throw new Error(`Orca Pi worker did not become ready: ${ready.wait.blockedReason ?? ready.wait.status ?? "timeout"}`);
-          dispatchAttempted = true;
-          const dispatched = await callOrca([
-            "orchestration", "dispatch",
+          workerStartAttempted = true;
+          const started = await callOrca([
+            "orchestration", "worker-start",
             "--task", taskId,
-            "--to", terminalId,
+            "--terminal", terminalId,
             "--run", activeRunId,
-            "--inject",
-          ]);
-          const dispatchId = resultId(dispatched, ["dispatch", "id"], ["dispatchId"]);
-          if (!dispatchId) throw new Error("Orca dispatch returned no dispatch id.");
+          ], { timeoutMs: readyTimeoutMs + 10_000 });
+          const dispatchId = resultId(started, ["dispatchId"], ["dispatch", "id"]);
+          if (started?.state !== "ready" || !dispatchId) {
+            throw new Error(started?.lastError ?? "Orca worker-start did not return a ready Dispatch.");
+          }
+          terminalId = resultId(started, ["worker", "agent_terminal_handle"], ["agentTerminalHandle"]) ?? terminalId;
           return {
             text: `Orca worker ${dispatchId} started in ${params.cwd}.`,
             details: {
@@ -330,7 +363,7 @@ export function createOrcaRuntime({
             },
           };
         } catch (error) {
-          if (dispatchAttempted && taskId && terminalId) {
+          if (workerStartAttempted && taskId && terminalId) {
             try {
               const recovered = await callOrca(["orchestration", "dispatch-show", "--task", taskId]);
               const dispatchId = resultId(recovered, ["dispatch", "id"], ["dispatchId"]);
@@ -346,9 +379,9 @@ export function createOrcaRuntime({
                 };
               }
             } catch {
-              // The dispatch outcome remains uncertain. Preserve the terminal and
-              // Task rather than risking cancellation of a worker that may be live.
-              throw new Error(`Orca dispatch outcome is uncertain for Task ${taskId}; inspect it with orchestration dispatch-show before retrying. Original error: ${error instanceof Error ? error.message : String(error)}`);
+              // The worker-start outcome remains uncertain. Preserve the terminal
+              // and Task rather than risking cancellation of a worker that may be live.
+              throw new Error(`Orca worker-start outcome is uncertain for Task ${taskId}; inspect it with orchestration dispatch-show before retrying. Original error: ${error instanceof Error ? error.message : String(error)}`);
             }
           }
           await failUndispatchedTask(taskId, terminalId, error instanceof Error ? error.message : String(error));
@@ -357,7 +390,7 @@ export function createOrcaRuntime({
       }
 
       if (method === "status") {
-        const show = await callOrca(["orchestration", "worker-show", "--dispatch", params.id]);
+        const show = await showWorker(params);
         const state = normalizedState(show, params.requestedStop);
         const read = params.includeActivity === false ? undefined : await readWorker(params.id);
         const summary = summaryFromShow(show) || outputFromRead(read);
@@ -424,7 +457,25 @@ export function createOrcaRuntime({
       }
 
       if (method === "stop") {
-        const result = await callOrca(["orchestration", "worker-stop", "--dispatch", params.id]);
+        let result;
+        try {
+          result = await callOrca(["orchestration", "worker-stop", "--dispatch", params.id]);
+        } catch (error) {
+          if (!params.taskId || !params.terminalId || !hasOrcaErrorCode(error, "dispatch_not_found")) throw error;
+          const legacy = await readLegacyDispatch(params.taskId);
+          if (!legacy) throw error;
+          await callOrca(["terminal", "close", "--terminal", params.terminalId]);
+          if (normalizedState(legacy) === "running") {
+            await callOrca([
+              "orchestration", "task-update",
+              "--id", params.taskId,
+              "--status", "failed",
+              "--result", JSON.stringify({ error: "Stopped by Minions through legacy Orca dispatch recovery." }),
+              "--run", activeRunId,
+            ]);
+          }
+          result = { state: "stopped", processAction: "legacy-terminal-close" };
+        }
         if (result?.state === "stop_unknown") {
           throw new Error(result.lastError ?? `Orca could not prove that worker ${params.id} stopped; inspect worker-show before retrying.`);
         }
@@ -432,7 +483,14 @@ export function createOrcaRuntime({
       }
 
       if (method === "release") {
-        const result = await callOrca(["orchestration", "worker-release", "--dispatch", params.id]);
+        let result;
+        try {
+          result = await callOrca(["orchestration", "worker-release", "--dispatch", params.id]);
+        } catch (error) {
+          if (!params.terminalId || !hasOrcaErrorCode(error, "dispatch_not_found")) throw error;
+          const closed = await callOrca(["terminal", "close", "--terminal", params.terminalId]);
+          return { state: "released", processAction: "legacy-terminal-close", closed };
+        }
         if (result?.state === "release_unknown") {
           throw new Error(result.lastError ?? result.recovery ?? `Orca could not prove terminal release for worker ${params.id}.`);
         }
