@@ -66,8 +66,10 @@ applied only when its structured evidence is valid:
 An invalid named override is recorded on the worker and downgraded to the normal role
 route instead of failing the spawn. This preserves the requested semantic role and
 prevents retry loops from converting implementers or reviewers into mechanical
-workers. A user-requested model is separate: use `modelOverride` only when the user explicitly
-names the model, and omit it otherwise.
+workers. A user-requested model is separate: use `modelOverride` only when the user
+explicitly requests that exact model. The runtime derives a one-batch authorization
+from raw user input; an unauthorized override is audited and downgraded to the normal
+role route. Omit `modelOverride` otherwise.
 
 ## Counters
 

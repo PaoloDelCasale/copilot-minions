@@ -276,10 +276,10 @@ async function execute(tool, params, ctx) {
   return tool.execute("call-1", params, undefined, undefined, ctx);
 }
 
-async function start(harness, variant = "standard") {
+async function start(harness, variant = "standard", activationText) {
   harness.handlers.get("input")({
     source: "interactive",
-    text: `/skill:pi-minions${variant === "lb" ? "-lb" : ""}`,
+    text: activationText ?? `/skill:pi-minions${variant === "lb" ? "-lb" : ""}`,
   });
   return execute(harness.tools.get("minions_start"), { variant }, harness.ctx);
 }
@@ -495,12 +495,111 @@ test("writer worktrees remain exclusively leased until their worker is terminal"
 
 test("spawn preflights the entire batch before starting any child", async () => {
   const harness = createHarness();
-  await start(harness);
+  await start(harness, "standard", "/skill:pi-minions use gpt-missing for the next batch");
   await assert.rejects(spawn(harness, [
     { role: "explorer", task: "Explore" },
-    { role: "implementer", task: "Implement", cwd: "/repo/.worktrees/t1", modelOverride: "missing" },
-  ]), /does not offer requested model missing/);
+    { role: "implementer", task: "Implement", cwd: "/repo/.worktrees/t1", modelOverride: "gpt-missing" },
+  ]), /does not offer requested model gpt-missing/);
   assert.equal(harness.runtime.byMethod("spawn").length, 0);
+});
+
+test("model overrides without an explicit user request are audited and downgraded", async () => {
+  const harness = createHarness({
+    provider: "github-copilot",
+    modelCatalogs: {
+      "github-copilot": [
+        "claude-opus-5",
+        "gpt-5.3-codex",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "grok-4.5",
+      ],
+    },
+  });
+  await start(harness);
+  const result = await spawn(harness, [{
+    role: "planner",
+    task: "Plan the work",
+    modelOverride: "gpt-5.3-codex",
+  }]);
+
+  assert.equal(
+    harness.runtime.byMethod("spawn")[0].params.model,
+    "github-copilot/gpt-5.6-terra:max",
+  );
+  assert.equal(result.details.workers[0].requestedModelOverride, "gpt-5.3-codex");
+  assert.equal(result.details.workers[0].modelOverride, undefined);
+  assert.match(result.details.workers[0].modelOverrideRejection, /not explicitly requested by the user/i);
+  assert.match(result.content[0].text, /ignored 1 invalid model override/i);
+});
+
+test("an explicitly user-requested model override is limited to the next batch", async () => {
+  const harness = createHarness({
+    provider: "github-copilot",
+    modelCatalogs: {
+      "github-copilot": [
+        "claude-opus-5",
+        "gpt-5.3-codex",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "grok-4.5",
+      ],
+    },
+  });
+  await start(
+    harness,
+    "standard",
+    "/skill:pi-minions usa gpt-5.3-codex per il prossimo batch",
+  );
+  const authorized = await spawn(harness, [{
+    role: "planner",
+    task: "Plan the work",
+    modelOverride: "gpt-5.3-codex",
+  }]);
+  const repeated = await spawn(harness, [{
+    role: "planner",
+    task: "Plan another batch",
+    modelOverride: "gpt-5.3-codex",
+  }]);
+
+  assert.deepEqual(
+    harness.runtime.byMethod("spawn").map((call) => call.params.model),
+    ["github-copilot/gpt-5.3-codex:max", "github-copilot/gpt-5.6-terra:max"],
+  );
+  assert.equal(authorized.details.workers[0].modelOverride, "gpt-5.3-codex");
+  assert.equal(authorized.details.workers[0].modelOverrideRejection, undefined);
+  assert.match(repeated.details.workers[0].modelOverrideRejection, /not explicitly requested by the user/i);
+});
+
+test("the direct /minions command preserves an explicit model request", async () => {
+  const harness = createHarness({
+    provider: "github-copilot",
+    modelCatalogs: {
+      "github-copilot": [
+        "claude-opus-5",
+        "gpt-5.3-codex",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "grok-4.5",
+      ],
+    },
+  });
+  await harness.commands.get("minions").handler("usa gpt-5.3-codex per il prossimo batch");
+  await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  const result = await spawn(harness, [{
+    role: "planner",
+    task: "Plan the work",
+    modelOverride: "gpt-5.3-codex",
+  }]);
+
+  assert.equal(
+    harness.runtime.byMethod("spawn")[0].params.model,
+    "github-copilot/gpt-5.3-codex:max",
+  );
+  assert.equal(result.details.workers[0].modelOverrideRejection, undefined);
 });
 
 test("a partially failed RPC batch retains every launched child through terminal usage", async () => {

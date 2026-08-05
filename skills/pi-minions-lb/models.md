@@ -39,7 +39,10 @@ uses `grok-4.5:high`; `escalate-sol-low` uses `gpt-5.6-sol:low`;
 `escalate-sol-medium` uses `gpt-5.6-sol:medium`.
 
 Terra, Sol high, and Sol max escalation routes are unavailable in this profile.
-Every spawn pins provider, model, and effort.
+Every spawn pins provider, model, and effort. A user-requested model may override the
+model for the next batch only; it must exist under the captured provider. The runtime
+derives this authorization from raw user input and audits/downgrades any unauthorized
+`modelOverride` to the normal role route.
 
 Normal dispatch omits every override field. `mechanical-judgment` requires a
 mechanical merge-conflict or GitHub judgment reason. Every escalation requires a
