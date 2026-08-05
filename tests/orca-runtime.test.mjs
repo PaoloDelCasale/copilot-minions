@@ -65,7 +65,6 @@ test("the Orca runtime uses native Run, Task, terminal, and Dispatch lifecycle",
     if (command === "orchestration task-create") return { task: { id: `task-${nextTask++}` } };
     if (command === "terminal create") return { terminal: { handle: "term-worker" } };
     if (command === "terminal wait") return { wait: { satisfied: true, status: "idle" } };
-    if (command === "orchestration dispatch") return { dispatch: { id: `dispatch-${nextDispatch++}` } };
     if (command === "orchestration worker-show") return {
       dispatch: { id: args.at(-1), status: "completed", result: JSON.stringify({ body: "STATUS: DONE\nImplemented" }) },
       task: { status: "completed" },
@@ -108,6 +107,10 @@ test("the Orca runtime uses native Run, Task, terminal, and Dispatch lifecycle",
   assert.equal(terminalCreate[terminalCreate.indexOf("--command") + 1], "pi --model github-copilot/gpt-5.6-terra --thinking max");
   const taskCreate = calls.find((args) => args.slice(0, 2).join(" ") === "orchestration task-create");
   const taskSpec = taskCreate[taskCreate.indexOf("--spec") + 1];
+  const initialStart = calls.find((args) => args.slice(0, 2).join(" ") === "orchestration worker-start");
+  assert.equal(initialStart[initialStart.indexOf("--task") + 1], "task-1");
+  assert.equal(initialStart[initialStart.indexOf("--terminal") + 1], "term-worker");
+  assert.equal(calls.some((args) => args.slice(0, 2).join(" ") === "orchestration dispatch"), false);
   assert.match(taskSpec, /Orca-managed Minions implementer/);
   assert.match(taskSpec, /worker_done exactly once/);
   assert.match(taskSpec, /do not call Orca ask/);
@@ -144,7 +147,53 @@ test("the Orca runtime uses native Run, Task, terminal, and Dispatch lifecycle",
   assert.equal((await runtime.call("release", { id: "dispatch-2" })).state, "released");
 });
 
-test("an uncertain Orca dispatch reply is reconciled before any terminal cleanup", async () => {
+test("legacy low-level Orca dispatches reconcile completion and release their exact terminal", async () => {
+  const calls = [];
+  const callOrca = async (args) => {
+    calls.push(args);
+    const command = args.slice(0, 2).join(" ");
+    if (args[0] === "status") return {
+      runtime: { state: "ready", capabilities: ["orchestration.contract.v1"] },
+      graph: { state: "ready" },
+    };
+    if (command === "orchestration run-create") return { run: { id: "run-legacy" } };
+    if (command === "orchestration worker-show") throw new Error("Orca CLI failed (dispatch_not_found): missing supervised worker");
+    if (command === "orchestration dispatch-show") return {
+      dispatch: { id: "ctx-legacy", task_id: "task-legacy", status: "completed" },
+    };
+    if (command === "orchestration task-list") return {
+      tasks: [{
+        id: "task-legacy",
+        status: "completed",
+        result: JSON.stringify({ body: "Legacy worker result" }),
+      }],
+    };
+    if (command === "orchestration worker-read") throw new Error("Orca CLI failed (dispatch_not_found): no supervised output");
+    if (command === "orchestration worker-release") throw new Error("Orca CLI failed (dispatch_not_found): no supervised worker");
+    if (command === "terminal close") return { close: { handle: "term-legacy" } };
+    throw new Error(`Unexpected Orca command: ${args.join(" ")}`);
+  };
+  const runtime = createOrcaRuntime({ host, callOrca, readRolePrompt: () => "Role." });
+  await runtime.call("ping");
+  const status = await runtime.call("status", {
+    id: "ctx-legacy",
+    taskId: "task-legacy",
+    terminalId: "term-legacy",
+    runId: "orca:ctx-legacy",
+  });
+  assert.equal(status.details.completion.state, "complete");
+  assert.equal(status.details.completion.summary, "Legacy worker result");
+  const release = await runtime.call("release", {
+    id: "ctx-legacy",
+    taskId: "task-legacy",
+    terminalId: "term-legacy",
+  });
+  assert.equal(release.state, "released");
+  assert.equal(release.processAction, "legacy-terminal-close");
+  assert.equal(calls.some((args) => args.join(" ").includes("terminal close --terminal term-legacy")), true);
+});
+
+test("an uncertain Orca worker-start reply is reconciled before any terminal cleanup", async () => {
   const calls = [];
   const callOrca = async (args) => {
     calls.push(args);
@@ -158,7 +207,7 @@ test("an uncertain Orca dispatch reply is reconciled before any terminal cleanup
     if (command === "orchestration task-create") return { task: { id: "task-1" } };
     if (command === "terminal create") return { terminal: { handle: "term-1" } };
     if (command === "terminal wait") return { wait: { satisfied: true } };
-    if (command === "orchestration dispatch") throw new Error("transport closed after mutation");
+    if (command === "orchestration worker-start") throw new Error("transport closed after mutation");
     if (command === "orchestration dispatch-show") return { dispatch: { id: "dispatch-recovered" } };
     if (command === "terminal close" || command === "orchestration task-update") {
       throw new Error(`unsafe cleanup attempted: ${command}`);
