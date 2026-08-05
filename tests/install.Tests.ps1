@@ -163,7 +163,11 @@ exit /b 0
     & (Join-Path $root 'install.ps1') -Platform codex -Variant lb | Out-Null
     $codexLbSkill = Join-Path $testHome '.agents\skills\codex-minions-lb'
     Assert-True (Test-Path $codexLbSkill) 'LB Codex installs without Terra'
-    Assert-True ((Get-Content (Join-Path $codexLbSkill 'models.md') -Raw) -match 'explorer.*gpt-5.6-luna.*medium') 'LB model overlay replaces standard routing'
+    $codexLbModels = Get-Content (Join-Path $codexLbSkill 'models.md') -Raw
+    Assert-True ($codexLbModels -match 'mechanical.*gpt-5.6-luna.*high') 'LB Codex mirrors Copilot mechanical routing'
+    Assert-True ($codexLbModels -match 'explorer.*gpt-5.6-luna.*max') 'LB Codex mirrors Copilot explorer routing'
+    Assert-True ($codexLbModels -match 'architect.*gpt-5.6-luna.*max') 'LB Codex mirrors Copilot architecture routing'
+    Assert-True (-not $codexLbModels.Contains('grok-4.5')) 'LB Codex excludes the Copilot-only Grok override'
 
     $env:MINIONS_TEST_MODELS = 'complete'
     & (Join-Path $root 'install.ps1') -Platform all -Variant all | Out-Null

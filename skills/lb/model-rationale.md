@@ -1,13 +1,14 @@
 # Low-budget model rationale
 
 This profile is inspired by the economical role routing in
-`nsEytgXm/subagents_configs`. OpenAI Codex keeps Luna low/medium/high according to
-role. GitHub Copilot uses its current, much cheaper Luna pricing more aggressively:
+`nsEytgXm/subagents_configs`. OpenAI Codex and GitHub Copilot now share the same
+Luna-first role routing:
 
 - Luna high for bounded mechanical work, avoiding max-effort latency;
 - Luna max for exploration, implementation, architecture, and planning;
 - Sol low for an independent review family;
-- Grok high only as the first evidence-backed escalation after an adverse result.
+- Grok high only as GitHub Copilot's first evidence-backed escalation after an adverse
+  result; OpenAI Codex retains Luna xhigh for that override.
 
 Artificial Analysis reports Luna max at 58.66% on its Coding Agent Index and 63.42%
 on DeepSWE, with about $0.31 observed cost per task, versus Grok high at 64.44%,
