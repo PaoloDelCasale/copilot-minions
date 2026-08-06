@@ -98,6 +98,7 @@ test("the Paseo runtime creates native child agents and normalizes their lifecyc
     if (name === "get_agent_activity") return { content: "Assistant: finished" };
     if (name === "send_agent_prompt") return { success: true, status: "running" };
     if (name === "cancel_agent") return { success: true };
+    if (name === "archive_agent") return { success: true };
     throw new Error(`Unexpected tool ${name}`);
   };
   let nextId = 1;
@@ -158,4 +159,19 @@ test("the Paseo runtime creates native child agents and normalizes their lifecyc
   assert.equal(resumed.details.asyncId, "paseo:agent-child:execution-2");
   await runtime.call("stop", { id: "agent-child", runId: resumed.details.asyncId });
   assert.deepEqual(calls.at(-1), { name: "cancel_agent", args: { agentId: "agent-child" } });
+  const released = await runtime.call("release", { id: "agent-child" });
+  assert.equal(released.state, "released");
+  assert.deepEqual(calls.at(-1), { name: "archive_agent", args: { agentId: "agent-child" } });
+});
+
+test("Paseo release treats an already archived run-owned agent as disposed", async () => {
+  const runtime = createPaseoRuntime({
+    callTool: async (name) => {
+      if (name === "archive_agent") throw new Error("Paseo MCP agent_not_found: already archived");
+      throw new Error(`Unexpected tool ${name}`);
+    },
+  });
+  const released = await runtime.call("release", { id: "agent-gone" });
+  assert.equal(released.state, "released");
+  assert.equal(released.processAction, "already-archived");
 });

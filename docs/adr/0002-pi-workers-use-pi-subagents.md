@@ -47,7 +47,11 @@ fan-out.
 ## Consequences
 
 Pi installation gains a pinned external package dependency and requires RPC v1
-capability preflight. Reload no longer aborts active workers. Worker token and cost
+capability preflight. Reload no longer aborts active workers. Unlike Paseo's idle
+native agents, a terminal `pi-subagents` run has process-terminal proof and no resident
+child Pi process; its durable artifact may remain for inspection or revival. Minions
+therefore records ordinary terminal workers disposed at close without a native release
+RPC. Worker token and cost
 totals are projected from package completion events or the persistent lifecycle v1
 artifact and credited once when read or closed. Cache-token cost categories are
 unavailable in the public completion contract, so only total cost is credited until

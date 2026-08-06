@@ -441,6 +441,8 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       output: worker.output,
       progress: worker.progress,
       error: worker.error,
+      disposition: worker.disposition,
+      dispositionError: worker.dispositionError,
       usage: worker.usage,
       pendingUsage: worker.pendingUsage,
       discipline: worker.discipline,
@@ -467,6 +469,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       runCostCeilingUsd: run.runCostCeilingUsd,
       runBudgetWarningSent: run.runBudgetWarningSent,
       dispatchBlockedReason: run.dispatchBlockedReason,
+      workerRetention: run.workerRetention,
       modelOverrideAuthorizations: [...run.modelOverrideAuthorizations],
       workers: [...run.workers.values()].map(workerSnapshot),
     });
@@ -1380,20 +1383,62 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   pi.registerTool({
     name: "minions_close",
     label: "Close Minions",
-    description: "Close the orchestration and restore the parent's original model.",
+    description: "Close the orchestration, dispose run-owned terminal workers by default, and restore the parent's original model.",
     parameters: schemas.close ?? {},
-    async execute(_id, _params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, _signal, _onUpdate, ctx) {
       lastContext = ctx;
-      if (!run) return textResult("No orchestration run is active.");
+      if (!run) return textResult("No orchestration run is active. Workers disposed: 0. Workers preserved: 0. Disposal failures: 0.", {
+        disposedWorkerIds: [],
+        preservedWorkerIds: [],
+        disposalFailures: [],
+      });
+      const workerPolicy = params.workerPolicy ?? "dispose";
+      const requestedPreservedIds = params.preserveWorkerIds ?? [];
+      if (workerPolicy === "dispose" && requestedPreservedIds.length > 0) {
+        throw new Error("preserveWorkerIds is valid only when workerPolicy is preserve.");
+      }
+      if (workerPolicy === "preserve" && requestedPreservedIds.length === 0 && run.workers.size > 0) {
+        throw new Error("workerPolicy preserve requires preserveWorkerIds listing every worker retained for handoff.");
+      }
+      const preservedIds = new Set(requestedPreservedIds);
+      for (const workerId of preservedIds) {
+        if (!run.workers.has(workerId)) throw new Error(`Cannot preserve unknown worker ${workerId}.`);
+      }
+
       const active = [...run.workers.values()].filter((worker) => activeStatus(worker.status));
       if (active.length > 0) throw new Error(`Cannot close with ${active.length} live worker(s).`);
-      const closing = run;
-      if (closing.runtime === "orca") {
-        await ensureRuntime();
-        const releases = await Promise.allSettled([...closing.workers.values()].map((worker) => runtimeCall("release", runtimeTarget(worker))));
-        const failedRelease = releases.find((result) => result.status === "rejected");
-        if (failedRelease) throw failedRelease.reason;
+      const untriaged = [...run.workers.values()].filter((worker) => !worker.triagedRunIds?.has(worker.subagentRunId));
+      if (untriaged.length > 0) {
+        throw new Error(`Cannot close before every final result is read and triaged. Call minions_read for: ${untriaged.map((worker) => worker.id).join(", ")}.`);
       }
+
+      const closing = run;
+      if (["paseo", "orca"].includes(closing.runtime) && closing.workers.size > 0) {
+        await ensureRuntime();
+        const statusChecks = await Promise.allSettled([...closing.workers.values()].map(async (worker) => {
+          const status = await runtimeCall("status", { ...runtimeTarget(worker), includeActivity: false });
+          return { worker, status, parsed: parseStatusText(status?.text ?? "") };
+        }));
+        const unavailable = statusChecks.find((result) => {
+          if (result.status === "fulfilled") return false;
+          const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          return !/(?:agent|dispatch|terminal)_(?:not_found|gone|archived)|already archived|\b(?:agent|dispatch|terminal)\b[^\n]{0,160}\bnot found\b/i.test(message);
+        });
+        if (unavailable?.status === "rejected") throw unavailable.reason;
+        const unexpectedlyLive = statusChecks
+          .filter((result) => result.status === "fulfilled")
+          .map((result) => result.value)
+          .filter(({ status, parsed }) => {
+            const snapshot = status?.details?.snapshot;
+            return parsed.state === "running"
+              || ["running", "initializing"].includes(snapshot?.status)
+              || (snapshot?.pendingPermissions?.length ?? 0) > 0;
+          });
+        if (unexpectedlyLive.length > 0) {
+          throw new Error(`Cannot close because ${unexpectedlyLive.length} native worker(s) still have an active turn or pending permission: ${unexpectedlyLive.map(({ worker }) => worker.id).join(", ")}.`);
+        }
+      }
+
       const originalModel = closing.originalModel
         ? ctx.modelRegistry.find(closing.originalModel.provider, closing.originalModel.id)
         : undefined;
@@ -1411,6 +1456,42 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
           changingModel = false;
         }
       }
+
+      const disposedWorkerIds = [];
+      const preservedWorkerIds = [];
+      const disposalFailures = [];
+      const workersToDispose = [];
+      for (const worker of closing.workers.values()) {
+        worker.dispositionError = undefined;
+        if (preservedIds.has(worker.id)) {
+          worker.disposition = "preserved";
+          preservedWorkerIds.push(worker.id);
+        } else if (closing.runtime === "pi-subagents") {
+          // pi-subagents has already proved its child process terminal. Its durable
+          // artifact is not a resident native worker and needs no release RPC.
+          worker.disposition = "disposed";
+          disposedWorkerIds.push(worker.id);
+        } else {
+          workersToDispose.push(worker);
+        }
+      }
+      if (workersToDispose.length > 0) {
+        const releases = await Promise.allSettled(workersToDispose.map((worker) => runtimeCall("release", runtimeTarget(worker))));
+        releases.forEach((result, index) => {
+          const worker = workersToDispose[index];
+          if (result.status === "fulfilled") {
+            worker.disposition = "disposed";
+            disposedWorkerIds.push(worker.id);
+          } else {
+            const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+            worker.disposition = "disposal-failed";
+            worker.dispositionError = message;
+            disposalFailures.push({ workerId: worker.id, error: message });
+          }
+        });
+      }
+
+      closing.workerRetention = workerPolicy === "preserve" ? "preserve-for-handoff" : "dispose-on-close";
       const pendingUsage = combineUsage(...[...closing.workers.values()].map((worker) => worker.pendingUsage));
       persistRun("closed");
       run = undefined;
@@ -1419,13 +1500,13 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       pendingModelOverrideAuthorizations = new Set();
       minionsRoutingRequired = false;
       ctx.ui?.setStatus?.("pi-minions", undefined);
-      const residualLabel = closing.runtime === "paseo"
-        ? "Paseo agents remain available"
-        : closing.runtime === "orca"
-          ? "Orca worker output archives remain available"
-          : "pi-subagents artifacts and resumable sessions remain available";
-      const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${residualLabel}.`, {
+      const summary = `Workers disposed: ${disposedWorkerIds.length}. Workers preserved: ${preservedWorkerIds.length}. Disposal failures: ${disposalFailures.length}.`;
+      const result = textResult(`Closed orchestration ${closing.id} and restored the original model. ${summary}`, {
         runId: closing.id,
+        workerRetention: closing.workerRetention,
+        disposedWorkerIds,
+        preservedWorkerIds,
+        disposalFailures,
       });
       if (pendingUsage) result.usage = pendingUsage;
       return result;

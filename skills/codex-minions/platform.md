@@ -20,6 +20,15 @@ scoped tasks; stop all dispatch at the hard gate. Use `/agent` only as a user-fa
 way to inspect or switch threads; steer, stop, and close agents through native session
 controls.
 
+At scope completion, follow the board's worker-retention policy. Default to
+`dispose-on-close`: after every final result is read, close only the native agents
+listed in the current run. Preserve only exact handoff-listed agents and record why.
+Codex may represent a terminal subagent as a thread rather than a dedicated resident
+OS process, so do not infer Paseo's memory leak from thread persistence alone. If the
+client exposes no terminal-agent disposal control, report those exact IDs as disposal
+failures/unsupported instead of claiming cleanup or targeting unrelated threads. The
+final response reports disposed, preserved, and failed counts.
+
 The frontier asks exactly one decision and waits. Use a structured interaction tool
 when the current client exposes one; otherwise ask one plain-text question and end the
 turn. Workers never interview the user and return `STATUS: NEEDS_USER_INPUT`.

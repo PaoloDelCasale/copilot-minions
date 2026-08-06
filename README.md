@@ -301,7 +301,14 @@ completed workers can be resumed; a completed architect may remain the same-slic
 architecture owner when Goal, Spec, fixed point, worktree, and budget eligibility are
 unchanged. Reviewers remain fresh and independent, while simple gate or compatibility
 fixes stay on mechanical or implementer routes. Deliberately stopped workers remain
-non-resumable. Paseo 0.2.5 does not expose a provider-persistent child deadline, so
+non-resumable. A completed Paseo worker is normally `idle`, not closed, and still owns
+a resident Pi process. `minions_close` therefore defaults to archiving only the
+terminal native agents owned by the current Minions run. An explicit handoff may use
+`workerPolicy: "preserve"` with exact `preserveWorkerIds`; every unlisted worker is
+still disposed. Already archived agents are idempotent success, and partial archive
+failures are reported without targeting the parent or unrelated agents.
+
+Paseo 0.2.5 does not expose a provider-persistent child deadline, so
 frontiers omit `timeoutSeconds` and use `maxDurationSeconds` for the model-aware
 watchdog. If an accidental Paseo timeout is supplied, the wrapper ignores it, retains
 the configured or model-default watchdog, records the ignored request, and returns an
@@ -323,9 +330,11 @@ exposes normalized live usage, the run warns at 75% of its default `$160` ceilin
 blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` may explicitly
 raise these safety floors; lower payload values are clamped to the model/run defaults.
 A watchdog stop retains worker and worktree ownership until the native host
-confirms the terminal lifecycle. Worker usage is credited exactly once through `minions_read`,
-with `minions_close` flushing unread completion usage. Missed notifications are
-reconciled from the package's persistent lifecycle v3 artifact. Outside native hosts,
+confirms the terminal lifecycle. Worker usage is credited exactly once through
+`minions_read`; close requires every final result to have been read and triaged before
+native disposal. Missed notifications are reconciled from the package's persistent
+lifecycle v3 artifact. Ordinary `pi-subagents` children have exited by terminal proof,
+so close records them disposed while retaining only non-resident artifacts. Outside native hosts,
 `timeoutSeconds` maps to the package-owned persistent deadline. Orca's current CLI
 surface does not expose normalized token/cost usage, so Orca enforces duration ceilings
 while cost ceilings remain unavailable. Ordinary Pi reports finalized package cost but
@@ -337,8 +346,9 @@ per Minions assignment, an exactly routed background Pi terminal, and an injecte
 Dispatch. `worker-show`, `worker-read`, `worker-stop`, interrupt input, and terminal
 transfer on follow-up back `minions_read`, `minions_stop`, `minions_steer`, and
 `minions_resume`. Initial attachment tolerates the bounded agent-hook registration
-race, and close explicitly cleans retained/stopped external terminals by their recorded
-handle. Writer `cwd` paths must be Orca-managed worktrees prepared through
+race, and dispose-on-close explicitly releases and cleans retained/stopped external
+terminals by their recorded handle. Every close reports disposed, preserved, and
+failed worker IDs/counts. Writer `cwd` paths must be Orca-managed worktrees prepared through
 `orca worktree create`; raw linked worktrees cannot host native Orca terminals. The
 adapter is selected only from a complete Orca agent identity and fails closed on a
 partial identity. See [ADR 0004](docs/adr/0004-orca-hosted-pi-uses-native-orchestration.md).
