@@ -40,7 +40,20 @@ Orca-managed worktree; prepare it with `orca worktree create` rather than raw
 be revived with `minions_resume` while keeping the same Minions worker ID. Use this
 for a same-slice architecture owner only while Goal, Spec, fixed point, worktree, and
 budget eligibility remain unchanged. A worker deliberately stopped with
-`minions_stop` is not resumable. Paseo, Orca, and generic `pi-subagents`
+`minions_stop` is not resumable. A terminal result does not necessarily mean the
+native worker process is closed: in Paseo, `idle` remains a live resumable Pi process.
+`minions_close` closes the Minions context and restores the frontier model, but native
+cleanup is controlled by its `workerPolicy`. The default `dispose` policy archives
+run-owned terminal Paseo agents and releases exact Orca terminals only after every
+result has been read; ordinary `pi-subagents` children have already exited once their
+process-terminal proof is durable, so only their artifacts remain. Use
+`workerPolicy: "preserve"` only for an explicit handoff and pass the exact
+`preserveWorkerIds`; all unlisted terminal workers are disposed. Archiving/releasing
+is deliberately non-resumable, already-gone workers count as successful disposal,
+and partial failures are reported by worker ID. Never dispose the parent, unrelated
+native agents, or workers from another run.
+
+Paseo, Orca, and generic `pi-subagents`
 completion notifications are signals to call `minions_read`; do not bypass the
 adapter with generic `subagent`, MCP `create_agent`, `send_agent_prompt`,
 `create_workspace`, or direct Orca terminal/Dispatch lifecycle commands for top-level
@@ -55,6 +68,12 @@ retrying the worker or changing its role. Worker/run cost ceilings and native du
 watchdogs are safety floors: optional payloads may raise but never lower their defaults.
 Orca currently reports duration and terminal lifecycle but not normalized token/cost
 usage, so its watchdog enforces duration while
-Orca owns worker visibility and output archives. Omit `modelOverride`
+Orca owns worker visibility and output archives. Before scope completion, persist the
+final board, drain and triage every worker, then call `minions_close` and copy its
+`Workers disposed`, `Workers preserved`, and `Disposal failures` counts into the final
+response. `minions_close` rejects live, untriaged, permission-blocked, or active-turn
+workers.
+
+Omit `modelOverride`
 entirely unless raw user input explicitly requested that exact model for the next
 batch; never pass an empty string.

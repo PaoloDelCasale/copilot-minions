@@ -213,7 +213,7 @@ export function createPaseoRuntime({
         return {
           runtime: "paseo",
           version: 1,
-          methods: ["ping", "status", "spawn", "steer", "stop", "resume"],
+          methods: ["ping", "status", "spawn", "steer", "stop", "resume", "release"],
           providers,
         };
       }
@@ -288,6 +288,25 @@ export function createPaseoRuntime({
       if (method === "stop") {
         const result = await callTool("cancel_agent", { agentId: params.id });
         return { runId: params.runId ?? params.id, state: result?.success === false ? "running" : "stopping" };
+      }
+      if (method === "release") {
+        try {
+          const result = await callTool("archive_agent", { agentId: params.id });
+          if (result?.success === false) {
+            const message = result.error ?? result.message ?? `Paseo refused to archive agent ${params.id}.`;
+            if (/agent_(?:not_found|archived)|already archived|\bagent\b[^\n]{0,160}\bnot found\b/i.test(message)) {
+              return { state: "released", processAction: "already-archived", details: result };
+            }
+            throw new Error(message);
+          }
+          return { state: "released", processAction: "archive-agent", details: result };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (/agent_(?:not_found|archived)|already archived|\bagent\b[^\n]{0,160}\bnot found\b/i.test(message)) {
+            return { state: "released", processAction: "already-archived" };
+          }
+          throw error;
+        }
       }
       throw new Error(`Unsupported Paseo runtime method: ${method}`);
     },

@@ -16,6 +16,7 @@ Verify contract: <canonical commands or discovery pending>
 Triage budget: 0/8 soft; 0/30 hard
 Worker budget: 0/30 launches
 Cost budget: $0 / model-aware worker ceiling; $0 / run ceiling
+Worker retention: dispose-on-close
 Lifecycle: active
 ```
 
@@ -112,8 +113,13 @@ the same parent session.
 1. Let already in-flight workers finish, or stop them if the user requests it.
 2. Read and triage their results without dispatching replacements.
 3. Post the full run contract, full board, and a handoff packet.
-4. Mark the orchestration run closed and invoke adapter close controls when provided.
-5. Tell the user that continuation requires a new session and orchestration run.
+4. Set `Worker retention: preserve-for-handoff` only for workers intentionally
+   listed as resumable in the handoff packet; record the reason, worker ID, worktree,
+   branch, fixed point, and next action for each one. All other terminal workers remain
+   `dispose-on-close`.
+5. Invoke adapter close controls with the matching retention policy, report partial
+   disposal explicitly, and tell the user that continuation requires a new session and
+   orchestration run.
 
 The handoff packet contains Goal, decisions, all board rows, branches, worktrees,
 `based-on:` and `fixed:` SHAs, commits, verification results, unresolved concerns,
@@ -122,6 +128,23 @@ that were already in flight.
 
 ## Scope completion
 
-When `Done when` is satisfied, close the orchestration run. Do not automatically
-start an adjacent slice. Present the next bounded options and obtain one explicit
-choice before a new run contract.
+`dispose-on-close` is the default. Use `preserve-for-handoff` only when the board
+explicitly names workers expected to be resumed; preservation is never an implicit
+convenience or a way to keep every completed worker resident.
+
+When `Done when` is satisfied:
+
+1. drain every in-flight worker;
+2. call `minions_read` and triage every final result;
+3. verify no worker has an active turn or pending permission;
+4. persist the final full board and any handoff packet;
+5. call `minions_close` with the board's worker retention policy and, for handoff,
+   only the exact listed worker IDs;
+6. record every worker as `disposed`, `preserved`, or `disposal-failed` and report:
+   `Workers disposed: N`, `Workers preserved: N`, and `Disposal failures: N`.
+
+Disposal is run-scoped and idempotent: an already stopped or archived worker counts
+as disposed. Never target the parent, an unrelated agent, or a worker from another
+Minions run. A disposal failure does not authorize broad cleanup; report the partial
+close and its exact worker ID. Do not automatically start an adjacent slice. Present
+the next bounded options and obtain one explicit choice before a new run contract.

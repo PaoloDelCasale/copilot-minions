@@ -32,6 +32,16 @@ Paseo agent ID to a Minions worker ID, and gives every initial or resumed execut
 separate synthetic run ID. This preserves the existing launch, triage, and usage
 accounting semantics even though Paseo reuses one agent for follow-up prompts.
 
+A terminal Paseo worker may be `idle` while its Pi process remains resident; `idle`
+is not `closed`. Minions therefore owns the run-scoped retention decision even though
+Paseo owns the native lifecycle. Normal close archives each terminal run-owned agent
+after its result is read and its pending-permission/active-turn state is checked.
+Explicit handoff preservation lists exact worker IDs; unlisted workers are archived.
+Archive is idempotent for already-gone agents, makes the worker non-resumable, and may
+partially fail without broadening cleanup to the parent or unrelated agents.
+`minions_close` closes the orchestration context only after these outcomes are durable
+and reports disposed, preserved, and failed IDs.
+
 The Paseo platform installer pins `npm:pi-mcp-adapter@2.16.0`; the ordinary Pi
 platform continues to pin `npm:pi-subagents@0.37.2`, and `all` installs both. A process carrying `PASEO_AGENT_ID` fails closed when the
 matching injected MCP endpoint is absent; it must never fall back to invisible
@@ -42,7 +52,9 @@ persisted configuration.
 
 Paseo users see Minions workers in Paseo's native subagent track and receive Paseo
 finish notifications. Reloaded Minions sessions retain both board and native-agent
-identity. Ordinary Pi behavior remains on `pi-subagents`.
+identity. Normally completed scopes no longer retain resident terminal agents unless
+the final board explicitly preserves them for handoff. Ordinary Pi behavior remains
+on `pi-subagents`.
 
 Paseo 0.2.5 does not expose a persistent deadline on `create_agent`; the adapter
 therefore never forwards `timeoutSeconds`. Because tool clients can materialize

@@ -333,6 +333,13 @@ test("the extension registers TypeBox schemas for every public Minions tool", ()
   assert.equal(Value.Check(harness.tools.get("minions_spawn").parameters, {
     tasks: [{ role: "unknown", task: "Inspect" }],
   }), false);
+  assert.equal(Value.Check(harness.tools.get("minions_close").parameters, {
+    workerPolicy: "preserve",
+    preserveWorkerIds: ["worker-1"],
+  }), true);
+  assert.equal(Value.Check(harness.tools.get("minions_close").parameters, {
+    workerPolicy: "delete",
+  }), false);
 });
 
 test("start verifies pi-subagents RPC v1 before locking the frontier route", async () => {
@@ -1108,8 +1115,10 @@ test("stop waits for the package completion lifecycle before close", async () =>
 
   await assert.rejects(execute(harness.tools.get("minions_close"), {}, harness.ctx), /one live worker|1 live worker/);
   harness.runtime.complete(worker.subagentRunId, { state: "stopped", success: false, summary: "Stopped" });
+  await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
   const closed = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
   assert.match(closed.content[0].text, /Closed orchestration/);
+  assert.deepEqual(closed.details.disposedWorkerIds, [worker.id]);
 });
 
 test("a failed or paused worker can be resumed without losing its Minions identity", async () => {
@@ -1169,19 +1178,28 @@ test("a completed architect can resume as the same routed architecture owner", a
   });
 });
 
-test("close restores the original provider model and flushes unread usage", async () => {
+test("close requires durable triage, restores the original model, and disposes ordinary Pi workers", async () => {
   const harness = createHarness({ provider: "github-copilot", modelId: "gpt-4.1" });
   await start(harness);
   const spawned = await spawn(harness, [{ role: "explorer", task: "Explore" }]);
-  harness.runtime.complete(spawned.details.workers[0].subagentRunId, {
+  const worker = spawned.details.workers[0];
+  harness.runtime.complete(worker.subagentRunId, {
     totalTokens: { input: 10, output: 2, total: 12 },
     totalCost: { inputTokens: 10, outputTokens: 2, costUsd: 0.03 },
   });
 
+  await assert.rejects(execute(harness.tools.get("minions_close"), {}, harness.ctx), /read and triaged/);
+  const read = await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  assert.equal(read.usage.totalTokens, 12);
   const closed = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
   assert.deepEqual(harness.modelChanges.at(-1), { provider: "github-copilot", id: "gpt-4.1" });
   assert.equal(harness.thinkingChanges.at(-1), "high");
-  assert.equal(closed.usage.totalTokens, 12);
+  assert.equal(closed.usage, undefined);
+  assert.deepEqual(closed.details.disposedWorkerIds, [worker.id]);
+  assert.deepEqual(closed.details.disposalFailures, []);
+  assert.match(closed.content[0].text, /Workers disposed: 1.*Workers preserved: 0.*Disposal failures: 0/);
+  const repeated = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
+  assert.match(repeated.content[0].text, /Workers disposed: 0/);
 });
 
 test("a failed model restore leaves the orchestration active", async () => {
@@ -1593,6 +1611,13 @@ test("Orca sessions use native orchestration identities without dispatching pi-s
   const resumeCall = calls.find((call) => call.method === "resume");
   assert.equal(resumeCall.params.agent, "pi-minions-explorer");
   assert.equal(resumeCall.params.model, "openai-codex/gpt-5.6-luna:high");
+
+  await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+  const closed = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
+  assert.deepEqual(closed.details.disposedWorkerIds, [worker.id]);
+  const releaseCall = calls.find((call) => call.method === "release");
+  assert.equal(releaseCall.params.id, "dispatch-2");
+  assert.equal(releaseCall.params.terminalId, "term-worker-1");
 });
 
 test("Paseo sessions use native child agents without dispatching pi-subagents", async () => {
@@ -1676,4 +1701,95 @@ test("Paseo sessions use native child agents without dispatching pi-subagents", 
   assert.notEqual(resumed.details.worker.subagentRunId, worker.subagentRunId);
   const resumeCall = calls.find((call) => call.method === "resume");
   assert.equal(resumeCall.params.id, "child-1");
+});
+
+test("Paseo close disposes only run-owned terminal workers and records partial cleanup", async () => {
+  const calls = [];
+  let nextChild = 1;
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") return { runtime: "paseo", methods: ["ping", "status", "spawn", "stop", "resume", "release"] };
+      if (method === "spawn") {
+        const childId = `child-${nextChild++}`;
+        return { details: { asyncId: `paseo:${childId}:execution-1`, runtimeAgentId: childId } };
+      }
+      if (method === "status") {
+        return {
+          text: "State: complete",
+          details: {
+            snapshot: { status: "idle", pendingPermissions: [] },
+            completion: { runId: params.runId, state: "complete", success: true, summary: "Done" },
+          },
+        };
+      }
+      if (method === "release") {
+        if (params.id === "child-2") throw new Error("archive backend unavailable");
+        return { state: "released" };
+      }
+      throw new Error(`Unexpected Paseo method: ${method}`);
+    },
+  };
+  const harness = createHarness({ dependencies: { paseoRuntime } });
+  await start(harness);
+  const spawned = await spawn(harness, [
+    { role: "explorer", task: "Inspect A" },
+    { role: "reviewer", task: "Inspect B" },
+  ]);
+  await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+
+  const closed = await execute(harness.tools.get("minions_close"), {}, harness.ctx);
+  assert.deepEqual(calls.filter((call) => call.method === "release").map((call) => call.params.id), ["child-1", "child-2"]);
+  assert.deepEqual(closed.details.disposedWorkerIds, [spawned.details.workers[0].id]);
+  assert.deepEqual(closed.details.disposalFailures.map((failure) => failure.workerId), [spawned.details.workers[1].id]);
+  assert.match(closed.content[0].text, /Disposal failures: 1/);
+  const finalWorkers = harness.appendedEntries.at(-1).data.workers;
+  assert.equal(finalWorkers[0].disposition, "disposed");
+  assert.equal(finalWorkers[1].disposition, "disposal-failed");
+});
+
+test("handoff preservation keeps only listed Paseo workers out of disposal", async () => {
+  const calls = [];
+  let nextChild = 1;
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method, params = {}) {
+      calls.push({ method, params });
+      if (method === "ping") return { runtime: "paseo", methods: ["ping", "status", "spawn", "stop", "resume", "release"] };
+      if (method === "spawn") {
+        const childId = `child-handoff-${nextChild++}`;
+        return { details: { asyncId: `paseo:${childId}:execution-1`, runtimeAgentId: childId } };
+      }
+      if (method === "status") {
+        return {
+          text: "State: complete",
+          details: {
+            snapshot: { status: "idle", pendingPermissions: [] },
+            completion: { runId: params.runId, state: "complete", success: true, summary: "Done" },
+          },
+        };
+      }
+      if (method === "release") return { state: "released" };
+      throw new Error(`Unexpected Paseo method: ${method}`);
+    },
+  };
+  const harness = createHarness({ dependencies: { paseoRuntime } });
+  await start(harness);
+  const spawned = await spawn(harness, [
+    { role: "architect", task: "Prepare handoff", cwd: "/repo/.worktrees/handoff" },
+    { role: "reviewer", task: "Review handoff" },
+  ]);
+  const [retained, disposable] = spawned.details.workers;
+  await execute(harness.tools.get("minions_read"), {}, harness.ctx);
+  const closed = await execute(harness.tools.get("minions_close"), {
+    workerPolicy: "preserve",
+    preserveWorkerIds: [retained.id],
+  }, harness.ctx);
+
+  assert.deepEqual(calls.filter((call) => call.method === "release").map((call) => call.params.id), ["child-handoff-2"]);
+  assert.deepEqual(closed.details.preservedWorkerIds, [retained.id]);
+  assert.deepEqual(closed.details.disposedWorkerIds, [disposable.id]);
+  assert.equal(closed.details.workerRetention, "preserve-for-handoff");
+  assert.deepEqual(harness.appendedEntries.at(-1).data.workers.map((worker) => worker.disposition), ["preserved", "disposed"]);
 });

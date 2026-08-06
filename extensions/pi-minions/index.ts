@@ -96,7 +96,16 @@ export const schemas = {
   stop: Type.Object({
     workerIds: Type.Optional(Type.Array(Type.String(), { description: "Worker IDs; omit to stop every in-flight worker." })),
   }),
-  close: Type.Object({}),
+  close: Type.Object({
+    workerPolicy: Type.Optional(StringEnum(["dispose", "preserve"] as const, {
+      description: "Dispose run-owned terminal workers by default. Use preserve only for an explicit handoff and list every retained worker in preserveWorkerIds.",
+      default: "dispose",
+    })),
+    preserveWorkerIds: Type.Optional(Type.Array(Type.String(), {
+      uniqueItems: true,
+      description: "Run-owned terminal worker IDs intentionally retained for handoff. Required with workerPolicy preserve; invalid with dispose.",
+    })),
+  }),
 };
 
 export default function (pi: ExtensionAPI) {

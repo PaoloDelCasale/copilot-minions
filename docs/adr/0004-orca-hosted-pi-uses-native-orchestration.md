@@ -47,10 +47,13 @@ input to the exact worker terminal; stop uses `worker-stop`. Resume creates a fr
 Task and transfers the same terminal to a new Dispatch, preserving both the Pi session
 and Minions worker identity. Because an exactly routed terminal exists before
 `worker-start`, Orca correctly classifies it as external/reused and does not own its
-process cleanup. `minions_close` therefore asks `worker-release` for archive/accounting
-first and closes the exact recorded terminal when Orca returns `retained`; stopped or
-already-gone terminals are idempotent cleanup success. Compatibility recovery also
-recognizes Tasks created by the earlier low-level `dispatch --inject` prototype,
+process cleanup. With the default dispose-on-close policy, `minions_close` therefore
+asks `worker-release` for archive/accounting first and closes the exact recorded
+terminal when Orca returns `retained`; stopped or already-gone terminals are idempotent
+cleanup success. Explicit handoff preservation skips release only for exact listed
+run-owned worker IDs, and partial failures are recorded without touching unrelated
+Dispatches or terminals. Compatibility recovery also recognizes Tasks created by the
+earlier low-level `dispatch --inject` prototype,
 reconciles their terminal result from Task/Dispatch state, and closes their exact
 terminal during release.
 
