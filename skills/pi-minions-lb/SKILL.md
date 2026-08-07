@@ -38,3 +38,10 @@ Read [`platform.md`](platform.md) first, then:
 - [`disciplines.md`](disciplines.md) for engineering skills
 
 Start by calling `minions_start` with variant `lb`.
+Do not end the turn after `minions_start` returns. It only initializes the run and
+launches no worker. In the
+same turn, post the run contract and call `minions_spawn` for the first unblocked
+setup, discovery, or implementation task. If repository inspection is required first,
+dispatch it to a mechanical or explorer worker. End the turn only after
+`minions_spawn` or `minions_resume`, or ask one indispensable user question when no
+worker can proceed.

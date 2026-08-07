@@ -1,7 +1,9 @@
 # Pi adapter
 
 Use the Pi minions tools only. Call `minions_start` once with variant `standard`, then
-use `minions_spawn`, `minions_read`, `minions_steer`, `minions_resume`,
+continue the same turn until the first `minions_spawn`; startup alone is not a dispatch
+and is never a reason to wait for another cycle. Then use `minions_spawn`,
+`minions_read`, `minions_steer`, `minions_resume`,
 `minions_stop`, and `minions_close`. The extension owns Provider Affinity, Role
 Routing, Minions budgets, and board identity. In an ordinary Pi session, the
 installed `pi-subagents` package owns process lifecycle, persistence, FleetView,

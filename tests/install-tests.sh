@@ -169,6 +169,7 @@ grep -Fq 'Triage: 40/50' "${PI_SKILL}/control.md"
 grep -Fq 'Triage: 50/50' "${PI_SKILL}/control.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
 grep -Fq 'budgetClass: "closure"' "${PI_SKILL}/platform.md"
+grep -Fq 'Do not end the turn after `minions_start` returns.' "${PI_SKILL}/SKILL.md"
 [[ -f "${PI_EXTENSION}/index.ts" ]]
 [[ -f "${PI_EXTENSION}/orca-runtime.mjs" ]]
 [[ -f "${PI_AGENTS}/pi-minions-reviewer.md" ]]

@@ -119,6 +119,7 @@ exit /b 0
     Assert-True ($piControl.Contains('Triage: 50/50')) 'Control gate contains hard handoff budget'
     Assert-True (Test-Path (Join-Path $piSkill 'platform.md')) 'Pi contains adapter'
     Assert-True ((Get-Content (Join-Path $piSkill 'platform.md') -Raw).Contains('budgetClass: "closure"')) 'Pi adapter labels closure-only dispatch'
+    Assert-True ((Get-Content (Join-Path $piSkill 'SKILL.md') -Raw).Contains('Do not end the turn after `minions_start` returns.')) 'Pi skill continues through first dispatch after startup'
     Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'
     Assert-True (Test-Path (Join-Path $piExtension 'orca-runtime.mjs')) 'Orca native runtime adapter is installed with Pi'
     Assert-True (Test-Path (Join-Path $piAgents 'pi-minions-reviewer.md')) 'Pi reviewer agent is installed'
