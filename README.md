@@ -324,8 +324,8 @@ provisional for two minutes so automatic retry or compaction cannot release that
 lease prematurely, and provisional workers remain explicitly stoppable.
 
 Every Pi runtime uses the same model-aware budget profile. Defaults are Luna `$16`
-warning / `$24` stop / 60 minutes, Sol `$40` / `$60` / 90 minutes, Terra or Grok
-`$24` / `$40` / 70 minutes, and Opus 5 `$40` / `$60` / 100 minutes. Where the runtime
+warning / `$24` stop / 180 minutes, Sol `$40` / `$60` / 150 minutes, Terra or Grok
+`$24` / `$40` / 180 minutes, and Opus 5 `$40` / `$60` / 240 minutes. Where the runtime
 exposes normalized live usage, the run warns at 75% of its default `$160` ceiling and
 blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `maxRunCostUsd` may explicitly
 raise these safety floors; lower payload values are clamped to the model/run defaults.

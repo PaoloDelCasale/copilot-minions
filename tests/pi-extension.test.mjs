@@ -516,7 +516,7 @@ test("writer worktrees remain exclusively leased until their worker is terminal"
     cwd: "/repo/.worktrees/shared",
   }]);
   assert.equal(second.details.workers[0].maxCostUsd, 60);
-  assert.equal(second.details.workers[0].maxDurationSeconds, 5400);
+  assert.equal(second.details.workers[0].maxDurationSeconds, 150 * 60);
 });
 
 test("spawn preflights the entire batch before starting any child", async () => {
@@ -693,10 +693,10 @@ test("provider and low-budget matrices are preserved through per-run model overr
 
 test("model-aware worker and run cost ceilings use the expanded shared budget profile", async () => {
   const cases = [
-    { provider: "openai-codex", role: "mechanical", model: "gpt-5.6-luna", max: 24, warning: 16, duration: 60 * 60 },
-    { provider: "openai-codex", role: "planner", model: "gpt-5.6-terra", max: 40, warning: 24, duration: 70 * 60 },
-    { provider: "openai-codex", role: "reviewer", model: "gpt-5.6-sol", max: 60, warning: 40, duration: 90 * 60 },
-    { provider: "github-copilot", role: "explorer", model: "claude-opus-5", max: 60, warning: 40, duration: 100 * 60 },
+    { provider: "openai-codex", role: "mechanical", model: "gpt-5.6-luna", max: 24, warning: 16, duration: 180 * 60 },
+    { provider: "openai-codex", role: "planner", model: "gpt-5.6-terra", max: 40, warning: 24, duration: 180 * 60 },
+    { provider: "openai-codex", role: "reviewer", model: "gpt-5.6-sol", max: 60, warning: 40, duration: 150 * 60 },
+    { provider: "github-copilot", role: "explorer", model: "claude-opus-5", max: 60, warning: 40, duration: 240 * 60 },
   ];
   for (const entry of cases) {
     const harness = createHarness({ provider: entry.provider });
@@ -718,7 +718,7 @@ test("model-aware worker and run cost ceilings use the expanded shared budget pr
   }]);
   assert.equal(grokWorker.details.workers[0].maxCostUsd, 40);
   assert.equal(grokWorker.details.workers[0].warningCostUsd, 24);
-  assert.equal(grokWorker.details.workers[0].maxDurationSeconds, 70 * 60);
+  assert.equal(grokWorker.details.workers[0].maxDurationSeconds, 180 * 60);
 });
 
 test("frontier payloads cannot shrink the shared cost or duration safety floors", async () => {
@@ -736,7 +736,7 @@ test("frontier payloads cannot shrink the shared cost or duration safety floors"
   }]);
   assert.equal(result.details.workers[0].maxCostUsd, 24);
   assert.equal(result.details.workers[0].warningCostUsd, 16);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 3600);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 180 * 60);
   assert.equal(harness.appendedEntries.at(-1).data.runCostCeilingUsd, 160);
 });
 
@@ -750,7 +750,7 @@ test("Copilot Opus architects receive the explicit quality-route watchdog budget
   }]);
   assert.equal(result.details.workers[0].maxCostUsd, 60);
   assert.equal(result.details.workers[0].warningCostUsd, 40);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 6000);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 240 * 60);
 });
 
 test("named escalation routes retain their provider-specific model and effort", async () => {
@@ -1495,7 +1495,7 @@ test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", 
   assert.equal(Object.hasOwn(spawnCall.params, "timeoutMs"), false);
   assert.equal(result.details.workers[0].timeoutSeconds, 900);
   assert.equal(result.details.workers[0].timeoutSecondsIgnored, true);
-  assert.equal(result.details.workers[0].maxDurationSeconds, 70 * 60);
+  assert.equal(result.details.workers[0].maxDurationSeconds, 180 * 60);
   assert.match(result.content[0].text, /Ignored timeoutSeconds for 1 Paseo worker/);
   assert.match(result.content[0].text, /Do not retry with timeoutSeconds/);
 
@@ -1506,7 +1506,7 @@ test("blank model overrides fall back and Paseo ignores ordinary-Pi deadlines", 
     timeoutSeconds: 30,
   }]);
   assert.equal(incidentRegression.details.workers[0].timeoutSecondsIgnored, true);
-  assert.equal(incidentRegression.details.workers[0].maxDurationSeconds, 70 * 60);
+  assert.equal(incidentRegression.details.workers[0].maxDurationSeconds, 180 * 60);
 });
 
 test("Orca sessions use native orchestration identities without dispatching pi-subagents", async () => {

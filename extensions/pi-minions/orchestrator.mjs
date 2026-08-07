@@ -32,11 +32,11 @@ const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
 const DEFAULT_RUN_COST_CEILING_USD = 160;
 const MODEL_BUDGETS = {
-  "claude-opus-5": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 100 * 60 },
-  "gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 60 * 60 },
-  "gpt-5.6-sol": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 90 * 60 },
-  "gpt-5.6-terra": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 70 * 60 },
-  "grok-4.5": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 70 * 60 },
+  "claude-opus-5": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 240 * 60 },
+  "gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60 },
+  "gpt-5.6-sol": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 150 * 60 },
+  "gpt-5.6-terra": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 180 * 60 },
+  "grok-4.5": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 180 * 60 },
 };
 const REQUIRED_RPC_METHODS = ["ping", "status", "spawn", "steer", "stop", "resume"];
 const ROLE_AGENTS = {
