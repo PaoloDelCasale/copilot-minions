@@ -175,12 +175,12 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb')) 'LB Pi skill is installed'
     Assert-True (Test-Path (Join-Path $testHome '.pi\agent\skills\pi-minions-lb\control.md')) 'LB Pi contains control gate'
     $copilotLbModels = Get-Content (Join-Path $testHome '.copilot\skills\copilot-minions-lb\models.md') -Raw
-    Assert-True ($copilotLbModels -match 'mechanical.*gpt-5\.6-luna.*high') 'LB Copilot gets Luna high mechanical routing'
-    Assert-True ($copilotLbModels -match 'architect.*gpt-5\.6-luna.*max') 'LB Copilot gets Luna max architecture routing'
+    Assert-True ($copilotLbModels -match 'mechanical.*grok-4\.5.*high') 'LB Copilot gets Grok high mechanical routing'
+    Assert-True ($copilotLbModels -match 'architect.*grok-4\.5.*high') 'LB Copilot gets Grok high architecture routing'
     Assert-True ($copilotLbModels -match 'escalate-entry.*grok-4\.5.*high') 'LB Copilot keeps Grok as evidence-backed escalation'
     $piLbModels = Get-Content (Join-Path $testHome '.pi\agent\skills\pi-minions-lb\models.md') -Raw
     Assert-True ($piLbModels.Contains('gpt-5.6-luna:xhigh')) 'LB Pi documents Codex Luna overrides'
-    Assert-True ($piLbModels.Contains('gpt-5.6-luna:max')) 'LB Pi documents Copilot Luna max routes'
+    Assert-True ($piLbModels -match 'architect.*grok-4\.5.*high') 'LB Pi documents Copilot Grok high routes'
     Assert-True ($piLbModels.Contains('grok-4.5:high')) 'LB Pi documents Copilot Grok escalation'
     Assert-True (@(Get-ChildItem -LiteralPath $agentDirectory -Filter 'codex-minions*.toml').Count -eq 12) 'Both Codex variants install twelve agents'
     Assert-True (Test-Path (Join-Path $agentDirectory '.codex-minions-lb-manifest')) 'LB agent manifest is installed'

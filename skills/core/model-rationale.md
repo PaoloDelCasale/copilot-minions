@@ -3,8 +3,8 @@
 Routing differs by provider. OpenAI Codex retains Luna for bounded daily work, Sol
 for complex implementation, review, and escalation, and Terra for structured
 planning. GitHub Copilot's standard profile is a quality-first portfolio selected
-from its broader catalog; its low-budget profile is Luna-first with evidence-gated
-Grok and Sol escalation.
+from its broader catalog; its low-budget profile uses Grok 4.5 high for ordinary
+worker roles with independent Sol review and escalation.
 
 | Route kind | OpenAI Codex | GitHub Copilot standard | Rationale |
 |------------|--------------|-------------------------|-----------|
