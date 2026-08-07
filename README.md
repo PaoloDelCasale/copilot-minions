@@ -228,9 +228,9 @@ start a run. `minions_start` enforces this authorization in code rather than rel
 only on model instructions.
 
 Each orchestration run declares one bounded Goal, completion criteria, out-of-scope
-work, fixed point, verification contract, and worker/triage budgets. After eight
+work, fixed point, verification contract, and worker/triage budgets. After forty
 worker results the frontier enters closure mode and permits only already-boarded fix,
-review, gate, commit, or landing work. At thirty results it stops dispatching, drains
+review, gate, commit, or landing work. At fifty results it stops dispatching, drains
 in-flight work, posts a full handoff, and closes the run. Adjacent issue slices require
 a new explicit Goal.
 
@@ -315,8 +315,8 @@ the configured or model-default watchdog, records the ignored request, and retur
 actionable spawn warning. This prevents an ordinary-Pi deadline from silently reducing
 a multi-hour Paseo assignment to a few seconds.
 
-The wrapper enforces six concurrent workers and thirty launches. Eight triaged
-results trigger a soft gate that accepts only `budgetClass: "closure"` work; thirty
+The wrapper enforces six concurrent workers and fifty launches. Forty triaged
+results trigger a soft gate that accepts only `budgetClass: "closure"` work; fifty
 results trigger the hard handoff. Implementer and architect launches require an
 explicit linked Git worktree; the runtime rejects a primary checkout and holds an
 exclusive canonical-path lease until the writer is terminal. A Paseo failure remains

@@ -13,8 +13,8 @@ Done when: <observable completion criteria>
 Out of scope: <adjacent work not authorized>
 Fixed point: <branch/SHA or discovery pending>
 Verify contract: <canonical commands or discovery pending>
-Triage budget: 0/8 soft; 0/30 hard
-Worker budget: 0/30 launches
+Triage budget: 0/40 soft; 0/50 hard
+Worker budget: 0/50 launches
 Cost budget: $0 / model-aware worker ceiling; $0 / run ceiling
 Worker retention: dispose-on-close
 Lifecycle: active
@@ -42,8 +42,8 @@ Spawn a task only when every applicable check passes:
 6. **Routing** - role and route override match [`models.md`](models.md).
 7. **Runtime safety** - no writer lease conflict exists; provisional Paseo failures
    remain live for isolation, stop, and budget purposes.
-8. **Budget** - fewer than thirty worker results have been triaged and fewer than
-   thirty workers have been launched. At eight or more triaged results, the task must
+8. **Budget** - fewer than fifty worker results have been triaged and fewer than
+   fifty workers have been launched. At forty or more triaged results, the task must
    be already-boarded closure work and be marked as closure through the platform adapter.
 9. **Payload** - omit every optional field that is not intentionally used. On Paseo,
    never set `timeoutSeconds`; use only `maxDurationSeconds`. Do not send empty model,
@@ -90,7 +90,7 @@ override is audited, explained, and downgraded to the normal role route. Omit
 
 ## Soft closure gate
 
-At `Triage: 8/30`, mark the lifecycle `closure` and stop expanding the run. Do not
+At `Triage: 40/50`, mark the lifecycle `closure` and stop expanding the run. Do not
 start discovery, planning, setup, a new implementation slice, or adjacent work.
 Only already-boarded tasks in `fix`, `review`, `gate`, `commit`, or `landing` may
 continue, and every spawn must use the platform adapter's closure classification.
@@ -103,11 +103,11 @@ Closure routing is deliberately narrow:
 
 Platform adapters reject or prohibit normal spawns and resumes after the soft gate.
 A resumed worker inherits the class recorded at its original spawn. The six-worker
-concurrency and thirty-launch limits remain unchanged.
+concurrency and fifty-launch limits remain unchanged.
 
 ## Hard handoff
 
-At `Triage: 30/30`, stop dispatching. Do not start a thirty-first post-triage task in
+At `Triage: 50/50`, stop dispatching. Do not start a fifty-first post-triage task in
 the same parent session.
 
 1. Let already in-flight workers finish, or stop them if the user requests it.
@@ -123,7 +123,7 @@ the same parent session.
 
 The handoff packet contains Goal, decisions, all board rows, branches, worktrees,
 `based-on:` and `fixed:` SHAs, commits, verification results, unresolved concerns,
-and the next unblocked task. Counters may exceed thirty only while draining workers
+and the next unblocked task. Counters may exceed fifty only while draining workers
 that were already in flight.
 
 ## Scope completion

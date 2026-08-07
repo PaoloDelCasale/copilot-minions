@@ -115,8 +115,8 @@ exit /b 0
     Assert-True (Test-Path (Join-Path $codexSkill 'control.md')) 'Codex contains control gate'
     Assert-True (Test-Path (Join-Path $piSkill 'control.md')) 'Pi contains control gate'
     $piControl = Get-Content (Join-Path $piSkill 'control.md') -Raw
-    Assert-True ($piControl.Contains('Triage: 8/30')) 'Control gate contains soft closure budget'
-    Assert-True ($piControl.Contains('Triage: 30/30')) 'Control gate contains hard handoff budget'
+    Assert-True ($piControl.Contains('Triage: 40/50')) 'Control gate contains soft closure budget'
+    Assert-True ($piControl.Contains('Triage: 50/50')) 'Control gate contains hard handoff budget'
     Assert-True (Test-Path (Join-Path $piSkill 'platform.md')) 'Pi contains adapter'
     Assert-True ((Get-Content (Join-Path $piSkill 'platform.md') -Raw).Contains('budgetClass: "closure"')) 'Pi adapter labels closure-only dispatch'
     Assert-True (Test-Path (Join-Path $piExtension 'index.ts')) 'Pi extension is installed'

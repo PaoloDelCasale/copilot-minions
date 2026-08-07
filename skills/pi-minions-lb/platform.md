@@ -25,8 +25,8 @@ so a frontier cannot evade routing by changing worker roles after a rejected spa
 After spawning background work, end the turn immediately and do not poll
 `minions_read`. After a completion notification, read the worker result, update the
 board, and dispatch newly unblocked work. Never exceed six in-flight workers. The
-extension also enforces thirty launches. After eight triaged results it accepts only
-already-boarded closure work whose spawn sets `budgetClass: "closure"`; after thirty
+extension also enforces fifty launches. After forty triaged results it accepts only
+already-boarded closure work whose spawn sets `budgetClass: "closure"`; after fifty
 results it rejects every new dispatch.
 
 Inside Pi, this adapter takes precedence over the Codex adapter discovered from
