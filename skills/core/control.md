@@ -51,7 +51,15 @@ Spawn a task only when every applicable check passes:
 10. **Slice size** - an implementation task is one reviewable, commit-sized slice with
     explicit acceptance criteria. A broad issue range must be decomposed before a
     writer starts, even when all writes will later be serialized in one worktree.
-11. **Context age** - resume only a worker with zero prior continuations and an unchanged
+11. **Risk shape** - concurrency, locks, transactions, recovery/restart, migrations,
+    cache invalidation, authorization, or bounded traversal of producer-controlled data
+    requires role `architect` from the first write. Its prompt must include the complete
+    invariant and adversarial regression matrix before editing.
+12. **Review repair growth** - compare a proposed fix with the original ownership and
+    diff. If it introduces a new subsystem, schema/interface change, file-ownership area,
+    or grows the cumulative diff by roughly half, freeze edits and re-slice or ask the
+    user. Renaming the task does not create a new review lineage.
+13. **Context age** - resume only a worker with zero prior continuations and an unchanged
     contract. Review fixes get a fresh implementer; reviewers are always fresh. Otherwise
     spawn a fresh worker with the compact handoff from `loop.md`.
 
@@ -126,8 +134,10 @@ the same parent session.
 
 The handoff packet contains Goal, decisions, all board rows, branches, worktrees,
 `based-on:` and `fixed:` SHAs, commits, verification results, unresolved concerns,
-and the next unblocked task. Counters may exceed fifty only while draining workers
-that were already in flight.
+every `review-lineage:` with its cumulative round and ledger, and the next unblocked
+task. A new session restores those lineage counters before dispatch; handoff never
+resets review history. Counters may exceed fifty only while draining workers that were
+already in flight.
 
 ## Scope completion
 

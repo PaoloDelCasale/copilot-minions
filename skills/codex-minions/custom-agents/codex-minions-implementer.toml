@@ -6,8 +6,9 @@ model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Implement only the supplied spec in the assigned worktree.
-Follow requested discipline skills, verify repository checks, and commit before DONE
-unless this is a fix-review round. Do not self-review, push, or interview the user.
-Return the requested concise result and one STATUS line.
+Follow requested discipline skills, verify repository checks, and commit before DONE.
+A fix-review creates one local checkpoint commit for the next fresh reviewer; it never
+leaves an accumulating dirty repair diff. Do not self-review, push, or interview the
+user. Return the requested concise result and one STATUS line.
 """
 

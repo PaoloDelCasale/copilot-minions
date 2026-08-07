@@ -70,22 +70,32 @@ Task ID: <id>
 Role: reviewer
 Discipline: load code-review if available.
 Fixed point: <SHA>
-Spec: <acceptance criteria>
+Review lineage: <stable ID and cumulative round>
+Spec: <frozen acceptance criteria>
+Review ledger: <prior root findings, fix commits, and regression tests or none>
 Verify result: <one line>
 Working directory: <absolute worktree>
 
 Constraints:
 - Read-only and scoped to the worktree.
-- Confirm fixed point and non-empty committed diff.
+- Confirm fixed point, clean tree, and non-empty committed diff.
 - Review git diff <fixed>...HEAD and commits since <fixed>.
-- If fix-review changes are uncommitted, also review git diff HEAD.
+- Do not stop after the first blocker; complete the bounded review.
+- Group affected sibling paths under their shared violated invariant.
+- Classify each root finding as introduced regression, incomplete implementation/fix,
+  pre-existing defect, or out-of-scope hardening. Only the first two plus explicit frozen security
+  invariants may block; route the rest to Landing tasks.
+- Trace every blocker to the frozen Spec, concrete code, and a reproducer or missing test.
+- Verify every prior ledger entry and inspect equivalent sibling paths for recurrence.
 - Do not rerun lint, tests, or typecheck.
-- Report only correctness, security, regression, or missing-test blockers.
 
 Output:
 STATUS: REVIEW_APPROVED | REVIEW_CHANGES_REQUIRED | BLOCKED
-Changes:
-1. <blocking finding with file reference>
+Root findings:
+1. Invariant: <name>; class: <classification>; evidence: <file/reproducer>;
+   affected sibling paths: <complete list>; required closure: <observable result>
+Landing tasks:
+1. <non-blocking hardening or none>
 ```
 
 ## Integrated review
@@ -98,28 +108,31 @@ Role: reviewer
 Discipline: load code-review if available.
 Fixed point: <remote default or issue baseline SHA>
 Integrated HEAD: <SHA>
-Spec: <complete issue acceptance criteria>
+Review lineage: <stable ID and cumulative round>
+Spec: <frozen complete issue acceptance criteria>
+Review ledger: <prior root findings and fix commits or none>
 Inputs: <branches and commits reconciled>
 Verify result: <one line, including skipped required integrations>
 Working directory: <absolute worktree>
 
 Constraints:
-- Read-only and scoped to the worktree.
-- Confirm the fixed point and cumulative committed diff.
+- Read-only and scoped to the worktree; confirm a clean cumulative committed diff.
 - Review git diff <fixed>...<integrated HEAD>, not only the latest slice.
-- Trace every acceptance criterion to code and tests.
-- Check migrations, authorization invariants, compatibility, rollback, and
-  cross-slice interactions.
+- Do not stop after the first blocker; trace every acceptance criterion to code/tests.
+- Group sibling defects by root invariant and inspect every equivalent producer,
+  consumer, mutation, rollback, and serialization path before returning.
+- Classify findings and trace blockers to the frozen Spec or an explicit security
+  invariant. Pre-existing defects and extra hardening are Landing tasks.
+- Verify prior ledger entries and cross-slice interactions.
 - Do not rerun lint, tests, or typecheck.
-- Put only correctness/security/regression/test blockers under Changes; report
-  publication or issue-tracker work separately as Landing tasks.
 
 Output:
 STATUS: REVIEW_APPROVED | REVIEW_CHANGES_REQUIRED | BLOCKED
-Changes:
-1. <blocking finding with file reference>
+Root findings:
+1. Invariant: <name>; class: <classification>; evidence: <file/reproducer>;
+   affected sibling paths: <complete list>; required closure: <observable result>
 Landing tasks:
-1. <non-code follow-up or none>
+1. <non-blocking follow-up or none>
 ```
 
 ## Fix review
@@ -128,24 +141,29 @@ Landing tasks:
 Task ID: <id>
 Role: implementer | architect
 Discipline: load tdd if available.
-Current HEAD: <SHA and dirty/clean state>
-Changes: <verbatim unresolved reviewer findings>
+Current HEAD: <clean SHA>
+Review lineage: <stable ID and cumulative round>
+Root findings: <verbatim unresolved consolidated findings>
+Review ledger: <prior findings, checkpoint commits, and regression tests>
 Preserved invariants: <compact cumulative invariants>
-Regression matrix: <required after the second changes-required result, otherwise none>
-Verify delta: <focused commands; canonical contract remains authoritative>
+Regression matrix: <mandatory redesign matrix after the second negative review>
+Slice growth: <original ownership/diff versus proposed repair>
+Verify delta: <focused regression and affected shards>
 Working directory: <absolute worktree>
 
 Constraints:
-- Reproduce each issue with a failing test where practical.
-- After the second changes-required result, use role `architect` and cover every
-  invariant in the regression matrix before editing.
-- Fix only reviewer findings and direct consequences.
-- Rerun the verify contract; required skipped integrations are concerns, not passes.
-- Save full logs outside the repository; return only failure excerpts and the final summary.
-- Do not commit; final commit is a separate worker.
+- Reproduce each root finding with a failing test where practical.
+- On the first repair, fix only the findings and direct consequences.
+- After the second negative review, freeze edits until the architect has consolidated
+  every finding, inspected sibling paths, completed the matrix, and confirmed the slice
+  still fits its growth budget. Otherwise return `NEEDS_USER_INPUT` with re-slice options.
+- Run the focused verify delta; the canonical gate runs after final approval. A changed
+  contract, subsystem seam, or baseline requires the canonical gate now.
+- Commit the repair as one local checkpoint commit; never push or self-review.
+- Save full logs outside the repository; return only failure excerpts and final summary.
 
-Output: verify result and diff stat.
-STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED
+Output: checkpoint commit SHA, verify result, ledger delta, and diff stat.
+STATUS: DONE | DONE_WITH_CONCERNS | NEEDS_USER_INPUT | BLOCKED
 ```
 
 ## Architect continuation
@@ -156,19 +174,24 @@ worktree. The follow-up message is a compact delta:
 ```text
 Task ID: <id>
 Role: architect continuation
-Current HEAD: <SHA and dirty/clean state>
-Changes: <verbatim new reviewer findings>
+Current HEAD: <clean SHA>
+Review lineage: <stable ID and cumulative round>
+Root findings: <verbatim new consolidated reviewer findings>
+Review ledger: <prior findings, checkpoint commits, and regression tests>
 Cumulative invariants: <unresolved and previously fixed invariants>
-Regression matrix: <new and retained adversarial cases>
+Regression matrix: <complete new and retained adversarial cases>
+Slice growth: <original ownership/diff versus proposed repair>
 Verify delta: <focused commands; canonical contract remains in retained context>
 
 Constraints:
-- This is the worker's only allowed continuation; inspect the current diff and finding locations first.
+- This is the worker's only allowed continuation; inspect the committed lineage first.
+- Before editing, consolidate root invariants and inspect all sibling paths.
+- Stop with re-slice options if the repair exceeds the recorded growth budget.
 - Reproduce each new issue with a failing test where practical.
 - Fix only the findings and direct consequences.
-- Do not self-review or commit; a fresh review and mechanical commit follow.
+- Commit one local checkpoint; do not push or self-review. A fresh review follows.
 
-Output: design delta, verify result, diff stat.
+Output: checkpoint commit SHA, design delta, verify result, ledger delta, and diff stat.
 STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED
 ```
 

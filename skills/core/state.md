@@ -31,22 +31,36 @@ full board.
 ```
 
 Notes include worktree, branch, `based-on:`, `fixed:`, issue, model and effort,
-`round:` (maximum five), native worker/thread ID, verify result, commit SHA, and final
-worker disposition (`disposed`, `preserved`, or `disposal-failed`). A preserved row
-also records its retention reason, worktree, branch, fixed point, and next action; a
-failed disposal records the bounded error. A named route also records `overrideReason` and `overrideFromWorkerId` when applicable;
-a rejected request records `requestedRouteOverride` and `routeOverrideRejection`.
-When an architect writes a slice, also record it as the current
-`architecture-owner: <worker ID>` and retain it across review rounds. A resumed owner
-keeps that ID; record `continuations: 1/1`, and rotate to a fresh worker for any later
-fix. Each execution still increments Workers and each result increments Triage. Keep
-done and cancelled rows through close. The final board includes disposed,
-preserved, and failed worker IDs and counts.
+`review-lineage:` (stable across task/run/handoff), cumulative `round:` (maximum three),
+native worker/thread ID, verify baseline/result, commit SHAs, original ownership/diff
+budget, and final worker disposition (`disposed`, `preserved`, or `disposal-failed`).
+A preserved row also records its retention reason, worktree, branch, fixed point, and
+next action; a failed disposal records the bounded error. A named route also records
+`overrideReason` and `overrideFromWorkerId` when applicable; a rejected request records
+`requestedRouteOverride` and `routeOverrideRejection`.
+
+Every lineage carries a compact review ledger:
+
+```text
+Review ledger:
+- F1 <root invariant/classification> -> fixed by <checkpoint SHA>; regression <test>
+- F2 <root invariant/classification> -> unresolved; sibling paths <paths>
+- inspected: <equivalent paths checked by the latest complete review>
+```
+
+The ledger and round move with a handoff or corrective task and never reset unless the
+user approves a genuinely independent slice from a clean approved commit. When an
+architect writes a slice, also record it as the current `architecture-owner: <worker
+ID>` and retain it across review rounds. A resumed owner keeps that ID; record
+`continuations: 1/1`, and rotate to a fresh worker for any later fix. Each execution
+still increments Workers and each result increments Triage. Keep done and cancelled
+rows through close. The final board includes disposed, preserved, and failed worker IDs
+and counts.
 
 Phases:
 
 ```text
-implement -> review -> fix -> review ... -> gate -> commit -> landing -> done
+implement -> review -> fix/checkpoint -> review -> redesign/checkpoint -> review -> gate -> landing -> done
 ```
 
 The inbox is an abstraction. The platform adapter explains how worker results arrive,
