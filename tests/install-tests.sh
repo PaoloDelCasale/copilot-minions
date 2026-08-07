@@ -165,8 +165,8 @@ AGENTS="${MINIONS_HOME}/.codex/agents"
 [[ -f "${COPILOT_SKILL}/control.md" ]]
 [[ -f "${CODEX_SKILL}/control.md" ]]
 [[ -f "${PI_SKILL}/control.md" ]]
-grep -Fq 'Triage: 8/30' "${PI_SKILL}/control.md"
-grep -Fq 'Triage: 30/30' "${PI_SKILL}/control.md"
+grep -Fq 'Triage: 40/50' "${PI_SKILL}/control.md"
+grep -Fq 'Triage: 50/50' "${PI_SKILL}/control.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
 grep -Fq 'budgetClass: "closure"' "${PI_SKILL}/platform.md"
 [[ -f "${PI_EXTENSION}/index.ts" ]]

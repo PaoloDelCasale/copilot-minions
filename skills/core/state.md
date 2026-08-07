@@ -13,8 +13,8 @@ Done when: <observable criteria>
 Out of scope: <adjacent work>
 Fixed point: <branch/SHA or discovery pending>
 Verify: <canonical commands or discovery pending>
-Triage: <worker results>/30 (soft closure at 8)
-Workers: <launched>/30
+Triage: <worker results>/50 (soft closure at 40)
+Workers: <launched>/50
 Worker retention: dispose-on-close | preserve-for-handoff
 Lifecycle: active | closure | draining | handoff | closed
 ```

@@ -955,17 +955,22 @@ test("the soft triage handoff permits only closure work until the hard limit", a
   for (const worker of [closurePaused.details.workers[0], normalPaused.details.workers[0]]) {
     harness.runtime.complete(worker.subagentRunId, { success: false, state: "paused", summary: "Need another pass" });
   }
-  const six = await spawn(harness, Array.from({ length: 6 }, (_, index) => ({ role: "explorer", task: `Explore ${index}` })));
-  for (const worker of six.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
+  for (const [batch, size] of [6, 6, 6, 6, 6, 6, 2].entries()) {
+    const discovery = await spawn(harness, Array.from({ length: size }, (_, index) => ({
+      role: "explorer",
+      task: `Explore ${batch}-${index}`,
+    })));
+    for (const worker of discovery.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
+  }
   await execute(harness.tools.get("minions_read"), {}, harness.ctx);
 
   const spawnCallsAtSoftLimit = harness.runtime.byMethod("spawn").length;
-  await assert.rejects(spawn(harness, [{ role: "planner", task: "New scope" }]), /soft 8-result triage limit.*closure/i);
+  await assert.rejects(spawn(harness, [{ role: "planner", task: "New scope" }]), /soft 40-result triage limit.*closure/i);
   assert.equal(harness.runtime.byMethod("spawn").length, spawnCallsAtSoftLimit);
   await assert.rejects(execute(harness.tools.get("minions_resume"), {
     workerId: normalPaused.details.workers[0].id,
     message: "Continue ordinary work",
-  }, harness.ctx), /soft 8-result triage limit.*closure/i);
+  }, harness.ctx), /soft 40-result triage limit.*closure/i);
 
   const resumed = await execute(harness.tools.get("minions_resume"), {
     workerId: closurePaused.details.workers[0].id,
@@ -975,7 +980,7 @@ test("the soft triage handoff permits only closure work until the hard limit", a
   harness.runtime.complete(resumed.details.worker.subagentRunId, { summary: "approved" });
   await execute(harness.tools.get("minions_read"), { workerIds: [resumed.details.worker.id] }, harness.ctx);
 
-  for (const [batch, size] of [6, 6, 6, 3].entries()) {
+  for (const [batch, size] of [6, 3].entries()) {
     const final = await spawn(harness, Array.from({ length: size }, (_, index) => ({
       role: "mechanical",
       task: `Landing ${batch}-${index}`,
@@ -986,31 +991,31 @@ test("the soft triage handoff permits only closure work until the hard limit", a
   }
 
   const callsAtHardLimit = harness.runtime.byMethod("spawn").length;
-  await assert.rejects(spawn(harness, [{ role: "mechanical", task: "Too late", budgetClass: "closure" }]), /hard 30-result triage limit/i);
+  await assert.rejects(spawn(harness, [{ role: "mechanical", task: "Too late", budgetClass: "closure" }]), /hard 50-result triage limit/i);
   assert.equal(harness.runtime.byMethod("spawn").length, callsAtHardLimit);
   await assert.rejects(execute(harness.tools.get("minions_resume"), {
     workerId: normalPaused.details.workers[0].id,
     message: "Too late",
-  }, harness.ctx), /hard 30-result triage limit/i);
+  }, harness.ctx), /hard 50-result triage limit/i);
 });
 
-test("the wrapper enforces the thirty-launch worker budget even when results are unread", async () => {
+test("the wrapper enforces the fifty-launch worker budget even when results are unread", async () => {
   const harness = createHarness();
   await start(harness);
-  for (const [batch, size] of [6, 6, 6, 6, 6].entries()) {
+  for (const [batch, size] of [6, 6, 6, 6, 6, 6, 6, 6, 2].entries()) {
     const result = await spawn(harness, Array.from({ length: size }, (_, index) => ({
       role: "explorer",
       task: `Batch ${batch} task ${index}`,
     })));
     for (const worker of result.details.workers) harness.runtime.complete(worker.subagentRunId, { summary: "done" });
   }
-  await assert.rejects(spawn(harness, [{ role: "planner", task: "Thirty-first" }]), /at most 30 worker launches/);
+  await assert.rejects(spawn(harness, [{ role: "planner", task: "Fifty-first" }]), /at most 50 worker launches/);
 });
 
 test("partial successes consume their launch budget before the stop lifecycle completes", async () => {
-  const harness = createHarness({ runtimeOptions: { failSpawnAt: 29 } });
+  const harness = createHarness({ runtimeOptions: { failSpawnAt: 49 } });
   await start(harness);
-  for (const size of [6, 6, 6, 6, 4]) {
+  for (const size of [6, 6, 6, 6, 6, 6, 6, 6]) {
     const batch = await spawn(harness, Array.from({ length: size }, (_, index) => ({
       role: "explorer",
       task: `Completed task ${size}-${index}`,
@@ -1025,8 +1030,8 @@ test("partial successes consume their launch budget before the stop lifecycle co
   await assert.rejects(spawn(harness, [
     { role: "planner", task: "Would exceed A" },
     { role: "planner", task: "Would exceed B" },
-  ]), /at most 30 worker launches/);
-  assert.equal(harness.runtime.byMethod("spawn").length, 30);
+  ]), /at most 50 worker launches/);
+  assert.equal(harness.runtime.byMethod("spawn").length, 50);
 });
 
 test("completion output, tokens, and cost are credited exactly once", async () => {

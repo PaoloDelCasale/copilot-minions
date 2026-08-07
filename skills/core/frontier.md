@@ -51,9 +51,9 @@ contract before decomposition and apply its pre-spawn checks before every dispat
    incident: inspect its recorded stop reason and spawn contract before any retry.
    Never change role, escalate, or shrink the slice repeatedly while preserving the
    same timeout or payload defect.
-6. At eight triaged results, enter closure mode and dispatch only already-boarded
+6. At forty triaged results, enter closure mode and dispatch only already-boarded
    fix, review, gate, commit, or landing tasks using the adapter's closure classification.
-7. At thirty triaged results, stop dispatching, drain in-flight work, post the full
+7. At fifty triaged results, stop dispatching, drain in-flight work, post the full
    handoff packet, and close the orchestration run.
 
 A broad request to continue does not silently expand the Goal. When the current
