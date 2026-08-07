@@ -19,8 +19,8 @@
 | `escalate-sol-low` | `gpt-5.6-sol` | low |
 | `escalate-sol-medium` | `gpt-5.6-sol` | medium |
 
-The role routes mirror the GitHub Copilot low-budget profile. Codex retains Luna
-`xhigh` for `escalate-entry` instead of the Copilot-only Grok override.
+Codex remains Luna-first because Grok is unavailable through this provider. It uses
+Luna `xhigh` for `escalate-entry` instead of the Copilot-only Grok route.
 
 Terra, Grok, Sol high, and Sol max escalation routes are unavailable in this profile. Pin
 model and effort on every spawn; named overrides replace both values. There is no

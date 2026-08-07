@@ -373,14 +373,12 @@ GitHub Copilot (native and Pi):
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| Mechanical | `gpt-5.6-luna` | high |
-| Explorer / implementer / architect / planner | `gpt-5.6-luna` | max |
+| Mechanical / explorer / implementer / architect / planner | `grok-4.5` | high |
 | Reviewer | `gpt-5.6-sol` | low |
 
-Both LB profiles share these role routes. The Copilot LB profile reserves
-`grok-4.5:high` for the first evidence-backed escalation; Codex retains
-`gpt-5.6-luna:xhigh` for that override. This materially reduces expected spend while Sol
-low keeps review independent. See
+The Copilot LB profile uses `grok-4.5:high` for ordinary worker routes and its first
+evidence-backed escalation. Codex remains Luna-first and retains
+`gpt-5.6-luna:xhigh` for that override. Sol low keeps review independent. See
 `docs/research/copilot-low-budget-model-routing.md` for the benchmark and pricing
 rationale. Unlike the source configuration, LB does not add a
 separate validator or make review selective. Verify and mandatory review gates remain
