@@ -36,8 +36,10 @@ the question.
 
 ## Orchestration
 
-[`control.md`](control.md) is a hard gate, not guidance. Establish its bounded run
-contract before decomposition and apply its pre-spawn checks before every dispatch.
+[`control.md`](control.md) is a hard gate, not guidance. Startup is one dispatch turn:
+after `minions_start` returns, establish the bounded run contract and continue through
+the first unblocked `minions_spawn`; initialization alone never justifies waiting for a
+later cycle. Apply the pre-spawn checks before every dispatch.
 
 1. Decompose only the current Goal into tasks with IDs, types, specs, paths, and
    dependency edges.

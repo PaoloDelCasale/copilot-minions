@@ -1345,6 +1345,7 @@ test("Pi Minions is authorized only by slash commands", async () => {
   assert.match(prompt.systemPrompt, /never call MCP create_workspace/i);
   assert.match(prompt.systemPrompt, /existing Paseo workspace/i);
   assert.match(prompt.systemPrompt, /linked Git worktree/i);
+  assert.match(prompt.systemPrompt, /minions_start only initializes.*continue the same turn/i);
   assert.match(prompt.systemPrompt, /subagent_supervisor/);
 
   assert.deepEqual([...harness.commands.keys()], ["minions", "minions-lb"]);
