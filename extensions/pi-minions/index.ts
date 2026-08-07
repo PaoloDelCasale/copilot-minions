@@ -91,7 +91,7 @@ export const schemas = {
   }),
   resume: Type.Object({
     workerId: Type.String(),
-    message: Type.String({ description: "Follow-up instruction for a paused, failed, or completed worker." }),
+    message: Type.String({ description: "The worker's single compact follow-up instruction; spawn fresh context after it is used." }),
   }),
   stop: Type.Object({
     workerIds: Type.Optional(Type.Array(Type.String(), { description: "Worker IDs; omit to stop every in-flight worker." })),

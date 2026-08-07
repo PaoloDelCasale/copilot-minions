@@ -1157,6 +1157,28 @@ test("a failed or paused worker can be resumed without losing its Minions identi
   });
 });
 
+test("a worker rotates to fresh context after one continuation", async () => {
+  const harness = createHarness();
+  await start(harness);
+  const spawned = await spawn(harness, [{ role: "explorer", task: "Inspect the slice" }]);
+  const worker = spawned.details.workers[0];
+  harness.runtime.complete(worker.subagentRunId, { summary: "Initial inspection complete" });
+  await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+
+  const resumed = await execute(harness.tools.get("minions_resume"), {
+    workerId: worker.id,
+    message: "Check the bounded follow-up",
+  }, harness.ctx);
+  harness.runtime.complete(resumed.details.worker.subagentRunId, { summary: "Follow-up complete" });
+  await execute(harness.tools.get("minions_read"), { workerIds: [worker.id] }, harness.ctx);
+
+  await assert.rejects(execute(harness.tools.get("minions_resume"), {
+    workerId: worker.id,
+    message: "Continue growing the retained context",
+  }, harness.ctx), /context rotation.*fresh worker/i);
+  assert.equal(harness.runtime.byMethod("resume").length, 1);
+});
+
 test("a completed architect can resume as the same routed architecture owner", async () => {
   const harness = createHarness();
   await start(harness);
@@ -1636,6 +1658,7 @@ test("Paseo sessions use native child agents without dispatching pi-subagents", 
   const calls = [];
   let execution = 1;
   let state = "running";
+  let cumulativeUsage = { input: 10, cacheRead: 3, output: 2, costUsd: 0.02 };
   const paseoRuntime = {
     kind: "paseo",
     async call(method, params = {}) {
@@ -1661,8 +1684,17 @@ test("Paseo sessions use native child agents without dispatching pi-subagents", 
               state: "complete",
               success: true,
               summary: "Paseo child finished",
-              totalTokens: { input: 10, cacheRead: 3, output: 2, total: 15 },
-              totalCost: { inputTokens: 10, outputTokens: 2, costUsd: 0.02 },
+              totalTokens: {
+                input: cumulativeUsage.input,
+                cacheRead: cumulativeUsage.cacheRead,
+                output: cumulativeUsage.output,
+                total: cumulativeUsage.input + cumulativeUsage.cacheRead + cumulativeUsage.output,
+              },
+              totalCost: {
+                inputTokens: cumulativeUsage.input,
+                outputTokens: cumulativeUsage.output,
+                costUsd: cumulativeUsage.costUsd,
+              },
             },
           } : {},
         };
@@ -1713,6 +1745,21 @@ test("Paseo sessions use native child agents without dispatching pi-subagents", 
   assert.notEqual(resumed.details.worker.subagentRunId, worker.subagentRunId);
   const resumeCall = calls.find((call) => call.method === "resume");
   assert.equal(resumeCall.params.id, "child-1");
+
+  cumulativeUsage = { input: 16, cacheRead: 8, output: 5, costUsd: 0.05 };
+  const resumedRead = await execute(harness.tools.get("minions_read"), {
+    workerIds: [worker.id],
+  }, harness.ctx);
+  assert.deepEqual(resumedRead.usage, {
+    input: 6,
+    output: 3,
+    cacheRead: 5,
+    cacheWrite: 0,
+    totalTokens: 14,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+  });
+  assert.equal(resumedRead.details.workers[0].usage.cost.total, 0.05);
+  assert.equal(resumedRead.details.workers[0].usage.totalTokens, 29);
 });
 
 test("Paseo close disposes only run-owned terminal workers and records partial cleanup", async () => {

@@ -29,8 +29,12 @@ seam with two adapters:
 The Paseo adapter calls the stateless MCP endpoint directly with its injected
 capability headers. It creates native `pi/<provider>/<model>` child agents, maps each
 Paseo agent ID to a Minions worker ID, and gives every initial or resumed execution a
-separate synthetic run ID. This preserves the existing launch, triage, and usage
-accounting semantics even though Paseo reuses one agent for follow-up prompts.
+separate synthetic run ID. Paseo's `lastUsage` is cumulative for that native agent, so
+Minions credits only the positive delta at each terminal execution instead of summing
+repeated cumulative snapshots. This preserves exact-once launch, triage, and usage
+accounting even though Paseo reuses one agent for follow-up prompts. Each worker may
+receive at most one follow-up; later work rotates to a fresh worker with a compact board
+handoff.
 
 A terminal Paseo worker may be `idle` while its Pi process remains resident; `idle`
 is not `closed`. Minions therefore owns the run-scoped retention decision even though
@@ -61,5 +65,6 @@ therefore never forwards `timeoutSeconds`. Because tool clients can materialize
 optional fields despite prompt instructions, an accidental value is retained only as
 audit metadata, is reported in the spawn result, and does not shorten the model-aware
 `maxDurationSeconds` watchdog. Authenticated release validation must cover child
-visibility, status/activity projection, exact-once usage, cancellation, notification,
-reload, follow-up, and this deadline normalization.
+visibility, status/activity projection, cumulative-usage deltas across the single
+allowed follow-up, cancellation, notification, reload, context rotation, and this
+deadline normalization.

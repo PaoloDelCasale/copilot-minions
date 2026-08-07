@@ -297,11 +297,13 @@ Workspace: linked Git worktrees provide write isolation and are passed only as w
 cancellation, and follow-up runs onto the same `minions_*` interface. Paseo keeps one native agent ID
 while Minions assigns a new execution ID to each resumed run so launch and triage
 budgets remain exact. Minions persists both IDs across reloads. Paused, failed, and
-completed workers can be resumed; a completed architect may remain the same-slice
-architecture owner when Goal, Spec, fixed point, worktree, and budget eligibility are
-unchanged. Reviewers remain fresh and independent, while simple gate or compatibility
-fixes stay on mechanical or implementer routes. Deliberately stopped workers remain
-non-resumable. A completed Paseo worker is normally `idle`, not closed, and still owns
+completed workers may receive at most one continuation; later work rotates to a fresh
+worker with a compact board handoff instead of retaining an ever-growing transcript.
+A completed architect may remain the same-slice architecture owner for that one
+continuation when Goal, Spec, fixed point, worktree, and budget eligibility are
+unchanged. Review fixes use a fresh implementer, reviewers remain fresh and independent,
+and simple gate or compatibility fixes stay on mechanical or implementer routes.
+Deliberately stopped workers remain non-resumable. A completed Paseo worker is normally `idle`, not closed, and still owns
 a resident Pi process. `minions_close` therefore defaults to archiving only the
 terminal native agents owned by the current Minions run. An explicit handoff may use
 `workerPolicy: "preserve"` with exact `preserveWorkerIds`; every unlisted worker is
@@ -331,7 +333,9 @@ blocks new dispatch at the ceiling. `maxCostUsd`, `maxDurationSeconds`, and `max
 raise these safety floors; lower payload values are clamped to the model/run defaults.
 A watchdog stop retains worker and worktree ownership until the native host
 confirms the terminal lifecycle. Worker usage is credited exactly once through
-`minions_read`; close requires every final result to have been read and triaged before
+`minions_read`; because Paseo reports cumulative native-agent usage across follow-ups,
+Minions imports only the positive delta after each continuation. Close requires every
+final result to have been read and triaged before
 native disposal. Missed notifications are reconciled from the package's persistent
 lifecycle v3 artifact. Ordinary `pi-subagents` children have exited by terminal proof,
 so close records them disposed while retaining only non-resident artifacts. Outside native hosts,

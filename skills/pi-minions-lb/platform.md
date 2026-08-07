@@ -37,9 +37,11 @@ Implementer and architect tasks must pass an absolute linked-worktree `cwd`; the
 adapter rejects the primary checkout. Under Orca that path must also be an
 Orca-managed worktree; prepare it with `orca worktree create` rather than raw
 `git worktree add`. A paused, failed, or completed package run may
-be revived with `minions_resume` while keeping the same Minions worker ID. Use this
-for a same-slice architecture owner only while Goal, Spec, fixed point, worktree, and
-budget eligibility remain unchanged. A worker deliberately stopped with
+be revived once with `minions_resume` while keeping the same Minions worker ID. Use
+that single continuation for a transient retry or same-slice architecture owner only
+while Goal, Spec, fixed point, worktree, and budget eligibility remain unchanged.
+Review fixes use a fresh implementer; every reviewer is fresh. After one continuation,
+spawn a fresh worker with the compact board handoff from `loop.md`. A worker deliberately stopped with
 `minions_stop` is not resumable. A terminal result does not necessarily mean the
 native worker process is closed: in Paseo, `idle` remains a live resumable Pi process.
 `minions_close` closes the Minions context and restores the frontier model, but native

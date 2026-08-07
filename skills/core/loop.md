@@ -29,10 +29,12 @@ worktree are unchanged. Send only the current HEAD, verbatim new findings, cumul
 invariants, regression matrix, and verify delta; the retained worker context already
 contains the original discovery and design history.
 
-A continuation still consumes one launch and one triage result. Resumed workers retain
-their original budget class, so a normal architecture owner can be resumed only before
-the soft closure gate; if it is ineligible, spawn a fresh closure architect. Never
-retain an owner merely to avoid a justified fresh context.
+A continuation still consumes one launch and one triage result. Each worker may receive
+at most one continuation; after that, rotate to a fresh worker with a compact handoff.
+Resumed workers retain their original budget class, so a normal architecture owner can
+be resumed only before the soft closure gate; if it is ineligible, already continued,
+or carrying stale context, spawn a fresh closure architect. Never retain an owner merely
+to avoid a justified fresh context.
 
 1. **Implement** - role `implementer` or `architect`; pass the verify gate and commit.
    Whenever the writer is an architect, record it as `architecture-owner`.
@@ -40,13 +42,15 @@ retain an owner merely to avoid a justified fresh context.
    verification. Increment `round:` on the board.
 3. `REVIEW_APPROVED` - run the gate, then role `mechanical` commits review fixes or
    reports the unchanged HEAD.
-4. `REVIEW_CHANGES_REQUIRED` - if `round:` is below five, use an `implementer` for a
-   bounded local fix. Use an `architect` when the findings require cross-cutting design,
-   concurrency, transaction, rollback, recovery, or security-invariant changes, and
-   always after the second changes-required result on one slice. Resume an eligible
-   `architecture-owner`; otherwise spawn a fresh architect. Give it cumulative findings,
-   invariants, and a complete regression-test matrix. Then use a fresh reviewer. At
-   round five, stop and ask the user instead of dispatching another fix.
+4. `REVIEW_CHANGES_REQUIRED` - if `round:` is below five, spawn a fresh `implementer`
+   for a bounded local fix; do not resume the original implementer. Use an `architect`
+   when the findings require cross-cutting design, concurrency, transaction, rollback,
+   recovery, or security-invariant changes, and always after the second changes-required
+   result on one slice. Resume an eligible `architecture-owner` only when it has not yet
+   received its single continuation; otherwise spawn a fresh architect. Give it a compact
+   handoff containing current HEAD, verbatim findings, cumulative invariants, regression
+   matrix, and verify delta—not the prior transcript. Then use a fresh reviewer. At round
+   five, stop and ask the user instead of dispatching another fix.
 
 Route post-review gate repairs to the least expensive capable role: environment and
 command repair is `mechanical`; assertion, fixture, or compatibility fixes against an
@@ -55,8 +59,20 @@ contract or a cross-cutting invariant must change.
 
 Never resume a worker after `BLOCKED`, `NEEDS_CONTEXT`, environment repair, steering,
 or a changed Goal, Spec, fixed point, or worktree. A reviewer delta against the same
-slice is not a changed spec. For ineligible continuation, spawn a fresh worker with the
-delta folded into the prompt and mark the previous worker superseded.
+slice is not a changed spec. A paused or failed run may consume the worker's one
+continuation only when the failure is transient and no contract changed. For every
+ineligible or already-continued worker, spawn a fresh worker with a compact delta folded
+into the prompt and mark the previous worker superseded.
+
+## Context rotation
+
+Persistent context is a bounded optimization, not durable project memory. Use one
+initial execution plus at most one continuation. A fresh worker handoff contains only:
+current HEAD and dirty state, Goal/Spec/fixed point, unresolved verbatim findings,
+preserved invariants, focused verify commands, and known risks. Keep it under 15 lines
+before Constraints, store durable facts on the board, and never paste the old transcript
+or repeated command logs. Save full test output outside the repository and return only
+the failing excerpts and final summary. Reviewers are always fresh.
 
 ## Repository discovery
 
