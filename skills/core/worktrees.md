@@ -41,7 +41,9 @@ git rev-parse HEAD
 ```
 
 All later git and shell calls stay scoped to that worktree. Implementers commit before
-`DONE`; fix-review leaves changes uncommitted for the final mechanical commit.
+`DONE`; every fix-review also creates one local checkpoint commit before the next fresh
+review. Never push those checkpoints. Review and gate tasks require a clean tree so the
+lineage is traceable and each rejected repair can be reverted independently.
 
 After close, ask the user to choose either dependency-ordered merge or stacked PRs,
 then delegate landing to mechanical workers.

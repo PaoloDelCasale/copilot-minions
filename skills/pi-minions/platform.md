@@ -57,11 +57,18 @@ is deliberately non-resumable, already-gone workers count as successful disposal
 and partial failures are reported by worker ID. Never dispose the parent, unrelated
 native agents, or workers from another run.
 
-Paseo, Orca, and generic `pi-subagents`
-completion notifications are signals to call `minions_read`; do not bypass the
-adapter with generic `subagent`, MCP `create_agent`, `send_agent_prompt`,
-`create_workspace`, or direct Orca terminal/Dispatch lifecycle commands for top-level
-dispatch. In particular, a linked Git worktree passed as `cwd` is write isolation
+Paseo, Orca, and generic `pi-subagents` completion notifications are signals to call
+`minions_read`; notification text is not durable triage evidence by itself. Record both
+the Minions worker ID returned by `minions_spawn` and any native Paseo/Orca agent ID,
+but use only the Minions worker ID for `minions_read`, `overrideFromWorkerId`, resume,
+stop, and close. Do not dispatch until `minions_read` has recorded the terminal result
+and STATUS for that exact Minions ID. If a native notification arrives before the
+adapter result is durable, leave the task terminal-pending and wait for the next
+lifecycle signal rather than spawning its fix.
+
+Do not bypass the adapter with generic `subagent`, MCP `create_agent`,
+`send_agent_prompt`, `create_workspace`, or direct Orca terminal/Dispatch lifecycle
+commands for top-level dispatch. In particular, a linked Git worktree passed as `cwd` is write isolation
 inside the existing Paseo Workspace, not a request to create another Workspace.
 Paseo and Orca do not expose a package-owned persistent child deadline through this
 adapter, so omit `timeoutSeconds` for native workers and use `maxDurationSeconds` for

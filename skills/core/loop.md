@@ -8,6 +8,13 @@ Before implementation, discover and record one canonical gate: interpreter/envir
 commands, required external integrations, expected duration, and a sharding plan when
 the full suite can exceed worker timeout. Reuse that contract for every slice.
 
+Run the canonical gate for the initial implementation and once more after final review.
+A review fix runs its new regression plus the affected deterministic shards; do not
+repeat an unchanged full gate after every fix. Record baseline environment failures once
+and compare later results against that baseline. Any fix that changes the verification
+contract, crosses a subsystem seam, or invalidates the baseline triggers the full gate
+before its next review.
+
 Unavailable required integration tests are not passes. Implementation reports
 `DONE_WITH_CONCERNS`; the final post-review gate is `BLOCKED` unless the run contract
 explicitly delegates the missing check to a named CI gate and the user accepts it.
@@ -19,6 +26,20 @@ reconcile them first, then run a fresh integrated review before adding functiona
 The reviewer compares the cumulative diff with the complete issue acceptance criteria,
 including migrations, authorization invariants, compatibility, rollback, and cross-slice
 interactions. Repeat an integrated review before landing the final stack.
+
+## Review lineage
+
+Assign every implementation slice a stable `review-lineage:` before its first review.
+The lineage follows the same deliverable across task renames, worktree moves, handoffs,
+new orchestration runs, and corrective slices. Its review round and ledger never reset
+because the frontier renamed or re-dispatched the work. A new lineage is valid only for
+a genuinely independent acceptance criterion starting from a clean approved commit;
+when that distinction is ambiguous, ask the user.
+
+Keep the acceptance contract frozen during review. A blocker must trace to an acceptance
+criterion, a regression introduced by the lineage, an existing security/fail-closed
+invariant, or a direct consequence of a prior fix. Record useful hardening outside that
+contract as a landing task or follow-up instead of silently broadening the review.
 
 ## Architecture owner
 
@@ -36,21 +57,33 @@ be resumed only before the soft closure gate; if it is ineligible, already conti
 or carrying stale context, spawn a fresh closure architect. Never retain an owner merely
 to avoid a justified fresh context.
 
-1. **Implement** - role `implementer` or `architect`; pass the verify gate and commit.
-   Whenever the writer is an architect, record it as `architecture-owner`.
-2. **Review** - fresh role `reviewer`; review commits since `fixed:` without rerunning
-   verification. Increment `round:` on the board.
-3. `REVIEW_APPROVED` - run the gate, then role `mechanical` commits review fixes or
-   reports the unchanged HEAD.
-4. `REVIEW_CHANGES_REQUIRED` - if `round:` is below five, spawn a fresh `implementer`
-   for a bounded local fix; do not resume the original implementer. Use an `architect`
-   when the findings require cross-cutting design, concurrency, transaction, rollback,
-   recovery, or security-invariant changes, and always after the second changes-required
-   result on one slice. Resume an eligible `architecture-owner` only when it has not yet
-   received its single continuation; otherwise spawn a fresh architect. Give it a compact
-   handoff containing current HEAD, verbatim findings, cumulative invariants, regression
-   matrix, and verify delta—not the prior transcript. Then use a fresh reviewer. At round
-   five, stop and ask the user instead of dispatching another fix.
+1. **Implement** - role `implementer` or `architect`; pass the canonical verify gate,
+   commit, assign `review-lineage:`, and initialize its review ledger. Whenever the
+   writer is an architect, record it as `architecture-owner`.
+2. **Review** - fresh role `reviewer`; review committed changes since `fixed:` without
+   rerunning verification. Increment the lineage's cumulative `round:` on the board.
+   The reviewer completes the full review, groups blockers by violated invariant, and
+   inspects sibling paths governed by each invariant instead of stopping at the first
+   defect.
+3. `REVIEW_APPROVED` - run the canonical post-review gate. The tree must already contain
+   checkpoint commits for every review fix; a dirty tree is a gate failure, not work for
+   an automatic final commit.
+4. First `REVIEW_CHANGES_REQUIRED` - spawn a fresh `implementer` for a bounded local fix;
+   do not resume the original implementer. Give it the unresolved root findings, review
+   ledger, preserved invariants, focused verify delta, and slice-growth budget. The fix
+   worker reproduces the issue, commits one local checkpoint, and a fresh reviewer checks
+   the cumulative lineage.
+5. Second `REVIEW_CHANGES_REQUIRED` - freeze edits and enter **redesign**. Use an
+   `architect`; resume an eligible `architecture-owner` only when it has not consumed its
+   continuation, otherwise spawn a fresh architect. Before editing, consolidate every
+   prior finding by root invariant, inspect sibling paths, map the complete state/
+   transaction/boundedness matrix, and decide whether the slice still fits its ownership
+   and growth budget. If not, stop and ask the user to approve a re-slice. If it fits,
+   implement the redesign, commit a checkpoint, and use a fresh reviewer.
+6. At round three, stop and ask the user after any further
+   `REVIEW_CHANGES_REQUIRED`. Do not create a corrective task, handoff, worktree, or new
+   run to reset the lineage. Report the ledger, commits, unresolved root findings, and
+   the smallest re-slice or rollback options.
 
 Route post-review gate repairs to the least expensive capable role: environment and
 command repair is `mechanical`; assertion, fixture, or compatibility fixes against an

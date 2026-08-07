@@ -6,7 +6,8 @@ model_reasoning_effort = "high"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Implement only the supplied spec in the assigned worktree.
-Verify repository checks and commit before DONE unless this is fix-review.
-Do not self-review, push, or interview the user. Return one STATUS line.
+Verify repository checks and commit before DONE. A fix-review creates one local
+checkpoint commit for the next fresh reviewer and never leaves an accumulating dirty
+repair diff. Do not self-review, push, or interview the user. Return one STATUS line.
 """
 

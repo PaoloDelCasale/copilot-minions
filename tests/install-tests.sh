@@ -167,8 +167,13 @@ AGENTS="${MINIONS_HOME}/.codex/agents"
 [[ -f "${PI_SKILL}/control.md" ]]
 grep -Fq 'Triage: 40/50' "${PI_SKILL}/control.md"
 grep -Fq 'Triage: 50/50' "${PI_SKILL}/control.md"
+grep -Fq 'review-lineage:' "${PI_SKILL}/state.md"
+grep -Fq 'At round three, stop and ask the user' "${PI_SKILL}/loop.md"
+grep -Fq 'Do not stop after the first blocker' "${PI_SKILL}/prompts.md"
+grep -Fq 'checkpoint commit' "${PI_SKILL}/prompts.md"
 [[ -f "${PI_SKILL}/platform.md" ]]
 grep -Fq 'budgetClass: "closure"' "${PI_SKILL}/platform.md"
+grep -Fq '`minions_read` has recorded the terminal result' "${PI_SKILL}/platform.md"
 grep -Fq 'Do not end the turn after `minions_start` returns.' "${PI_SKILL}/SKILL.md"
 [[ -f "${PI_EXTENSION}/index.ts" ]]
 [[ -f "${PI_EXTENSION}/orca-runtime.mjs" ]]
