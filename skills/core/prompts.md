@@ -40,6 +40,7 @@ Constraints:
 - Edit only Files and direct imports/callers.
 - Use at most one explorer for missing cross-module context.
 - Run the repository's lint, test, and typecheck gate.
+- Keep full command logs outside the repository; return only failures and final summaries.
 - Commit task files before DONE; do not push.
 - Do not self-review.
 - Human decision -> STATUS: NEEDS_USER_INPUT.
@@ -127,9 +128,11 @@ Landing tasks:
 Task ID: <id>
 Role: implementer | architect
 Discipline: load tdd if available.
-Changes: <verbatim reviewer findings>
-Cumulative review history: <all findings for this slice>
+Current HEAD: <SHA and dirty/clean state>
+Changes: <verbatim unresolved reviewer findings>
+Preserved invariants: <compact cumulative invariants>
 Regression matrix: <required after the second changes-required result, otherwise none>
+Verify delta: <focused commands; canonical contract remains authoritative>
 Working directory: <absolute worktree>
 
 Constraints:
@@ -138,6 +141,7 @@ Constraints:
   invariant in the regression matrix before editing.
 - Fix only reviewer findings and direct consequences.
 - Rerun the verify contract; required skipped integrations are concerns, not passes.
+- Save full logs outside the repository; return only failure excerpts and the final summary.
 - Do not commit; final commit is a separate worker.
 
 Output: verify result and diff stat.
@@ -159,7 +163,7 @@ Regression matrix: <new and retained adversarial cases>
 Verify delta: <focused commands; canonical contract remains in retained context>
 
 Constraints:
-- Use retained context; inspect the current diff and finding locations first.
+- This is the worker's only allowed continuation; inspect the current diff and finding locations first.
 - Reproduce each new issue with a failing test where practical.
 - Fix only the findings and direct consequences.
 - Do not self-review or commit; a fresh review and mechanical commit follow.

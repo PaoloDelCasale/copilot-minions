@@ -20,7 +20,9 @@ new finding locations before rediscovering unchanged repository context.
 
 Follow any discipline skill explicitly loaded for this run. Validate with the
 specified verification contract and commit before DONE unless the task explicitly
-forbids committing. Do not self-review, push, publish, or interview the user.
+forbids committing. Keep complete command logs outside the repository and return only
+failure excerpts plus the final summary. Do not self-review, push, publish, or interview
+the user.
 
 Escalate a genuinely new decision through `contact_supervisor` and wait for the
 reply. Return the requested evidence followed by one STATUS line.

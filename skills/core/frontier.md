@@ -50,7 +50,9 @@ contract before decomposition and apply its pre-spawn checks before every dispat
    counter once per worker result. A worker that stops without its STATUS is a runtime
    incident: inspect its recorded stop reason and spawn contract before any retry.
    Never change role, escalate, or shrink the slice repeatedly while preserving the
-   same timeout or payload defect.
+   same timeout or payload defect. A worker may receive at most one continuation; after
+   that, spawn a fresh worker with the compact board handoff defined in [`loop.md`](loop.md).
+   Never resume the original implementer for review fixes, and keep every reviewer fresh.
 6. At forty triaged results, enter closure mode and dispatch only already-boarded
    fix, review, gate, commit, or landing tasks using the adapter's closure classification.
 7. At fifty triaged results, stop dispatching, drain in-flight work, post the full

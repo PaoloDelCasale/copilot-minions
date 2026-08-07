@@ -38,8 +38,9 @@ failed disposal records the bounded error. A named route also records `overrideR
 a rejected request records `requestedRouteOverride` and `routeOverrideRejection`.
 When an architect writes a slice, also record it as the current
 `architecture-owner: <worker ID>` and retain it across review rounds. A resumed owner
-keeps that ID; each execution still increments Workers and each result increments
-Triage. Keep done and cancelled rows through close. The final board includes disposed,
+keeps that ID; record `continuations: 1/1`, and rotate to a fresh worker for any later
+fix. Each execution still increments Workers and each result increments Triage. Keep
+done and cancelled rows through close. The final board includes disposed,
 preserved, and failed worker IDs and counts.
 
 Phases:

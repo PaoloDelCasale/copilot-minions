@@ -51,6 +51,9 @@ Spawn a task only when every applicable check passes:
 10. **Slice size** - an implementation task is one reviewable, commit-sized slice with
     explicit acceptance criteria. A broad issue range must be decomposed before a
     writer starts, even when all writes will later be serialized in one worktree.
+11. **Context age** - resume only a worker with zero prior continuations and an unchanged
+    contract. Review fixes get a fresh implementer; reviewers are always fresh. Otherwise
+    spawn a fresh worker with the compact handoff from `loop.md`.
 
 If a check fails, do not spawn. Update the board, ask one user question when needed,
 or prepare a handoff.

@@ -17,6 +17,7 @@ const MAX_IN_FLIGHT = 6;
 const SOFT_TRIAGED_RESULTS = 40;
 const MAX_TRIAGED_RESULTS = 50;
 const MAX_WORKER_LAUNCHES = 50;
+const MAX_WORKER_RESUMES = 1;
 const BUDGET_CLASSES = new Set(["normal", "closure"]);
 const CLOSURE_ROLES = new Set(["mechanical", "implementer", "architect", "reviewer"]);
 const MECHANICAL_JUDGMENT_REASONS = new Set(["merge-conflict", "github-judgment"]);
@@ -199,6 +200,49 @@ function combineUsage(...items) {
     combined.cost.total += usage.cost?.total ?? 0;
   }
   return combined;
+}
+
+function usageDifference(current, previous) {
+  if (!current) return undefined;
+  if (!previous) return current;
+  const delta = (value, baseline) => {
+    const difference = Math.max(0, (Number(value) || 0) - (Number(baseline) || 0));
+    return Math.round(difference * 1e12) / 1e12;
+  };
+  const usage = {
+    input: delta(current.input, previous.input),
+    output: delta(current.output, previous.output),
+    cacheRead: delta(current.cacheRead, previous.cacheRead),
+    cacheWrite: delta(current.cacheWrite, previous.cacheWrite),
+    totalTokens: delta(current.totalTokens, previous.totalTokens),
+    cost: {
+      input: delta(current.cost?.input, previous.cost?.input),
+      output: delta(current.cost?.output, previous.cost?.output),
+      cacheRead: delta(current.cost?.cacheRead, previous.cost?.cacheRead),
+      cacheWrite: delta(current.cost?.cacheWrite, previous.cost?.cacheWrite),
+      total: delta(current.cost?.total, previous.cost?.total),
+    },
+  };
+  return usage.totalTokens > 0 || usage.cost.total > 0 ? usage : undefined;
+}
+
+function maximumUsage(previous, current) {
+  if (!previous) return current;
+  if (!current) return previous;
+  return {
+    input: Math.max(previous.input ?? 0, current.input ?? 0),
+    output: Math.max(previous.output ?? 0, current.output ?? 0),
+    cacheRead: Math.max(previous.cacheRead ?? 0, current.cacheRead ?? 0),
+    cacheWrite: Math.max(previous.cacheWrite ?? 0, current.cacheWrite ?? 0),
+    totalTokens: Math.max(previous.totalTokens ?? 0, current.totalTokens ?? 0),
+    cost: {
+      input: Math.max(previous.cost?.input ?? 0, current.cost?.input ?? 0),
+      output: Math.max(previous.cost?.output ?? 0, current.cost?.output ?? 0),
+      cacheRead: Math.max(previous.cost?.cacheRead ?? 0, current.cost?.cacheRead ?? 0),
+      cacheWrite: Math.max(previous.cost?.cacheWrite ?? 0, current.cost?.cacheWrite ?? 0),
+      total: Math.max(previous.cost?.total ?? 0, current.cost?.total ?? 0),
+    },
+  };
 }
 
 function sumCostSummaries(payload) {
@@ -447,6 +491,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       pendingUsage: worker.pendingUsage,
       discipline: worker.discipline,
       disciplineLoaded: worker.disciplineLoaded,
+      resumeCount: worker.resumeCount,
       observedRunIds: [...(worker.observedRunIds ?? [])],
       triagedRunIds: [...(worker.triagedRunIds ?? [])],
     };
@@ -494,6 +539,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         warningCostUsd: snapshot.warningCostUsd ?? budget.warningCostUsd,
         maxDurationSeconds: snapshot.maxDurationSeconds ?? budget.maxDurationSeconds,
         canonicalCwd: snapshot.canonicalCwd ?? normalizeGitPath("/", snapshot.cwd),
+        resumeCount: snapshot.resumeCount ?? Math.max(0, new Set([
+          ...(snapshot.observedRunIds ?? []),
+          snapshot.subagentRunId,
+        ].filter(Boolean)).size - 1),
         observedRunIds: new Set(snapshot.observedRunIds ?? []),
         triagedRunIds: new Set(snapshot.triagedRunIds ?? []),
       });
@@ -782,6 +831,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       maxDurationSeconds: route.maxDurationSeconds,
       canonicalCwd: route.canonicalCwd,
       output: "",
+      resumeCount: 0,
       observedRunIds: new Set(),
       triagedRunIds: new Set(),
       discipline: route.discipline,
@@ -851,8 +901,16 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     worker.error = completionError(payload);
     if (firstObservation) {
       const usage = usageFromCompletion(payload);
-      worker.usage = combineUsage(worker.usage, usage);
-      worker.pendingUsage = combineUsage(worker.pendingUsage, usage);
+      if (run.runtime === "paseo") {
+        // Paseo reports one cumulative native-agent snapshot across follow-up runs.
+        // Credit only the positive delta so a resume cannot re-import prior usage.
+        const delta = usageDifference(usage, worker.usage);
+        worker.usage = maximumUsage(worker.usage, usage);
+        worker.pendingUsage = combineUsage(worker.pendingUsage, delta);
+      } else {
+        worker.usage = combineUsage(worker.usage, usage);
+        worker.pendingUsage = combineUsage(worker.pendingUsage, usage);
+      }
     }
     persistRun();
     ctx?.ui?.setStatus?.("pi-minions", `${run.provider} · ${run.variant}`);
@@ -1287,7 +1345,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   pi.registerTool({
     name: "minions_resume",
     label: "Resume Minion",
-    description: "Revive a paused, failed, or completed worker with a follow-up message.",
+    description: "Revive a paused, failed, or completed worker for its single compact continuation.",
     parameters: schemas.resume ?? {},
     async execute(_id, params, _signal, _onUpdate, ctx) {
       lastContext = ctx;
@@ -1296,6 +1354,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (!worker) throw new Error(`Unknown worker: ${params.workerId}`);
       if (activeStatus(worker.status) || worker.status === "stopped") {
         throw new Error(`Worker ${params.workerId} cannot be resumed from status ${worker.status}.`);
+      }
+      if ((worker.resumeCount ?? 0) >= MAX_WORKER_RESUMES) {
+        throw new Error(`Worker ${params.workerId} reached the one-continuation context rotation limit; spawn a fresh worker with a compact handoff.`);
       }
       const inFlight = [...run.workers.values()].filter((candidate) => activeStatus(candidate.status)).length;
       if (inFlight >= MAX_IN_FLIGHT) throw new Error(`Pi minions allows at most ${MAX_IN_FLIGHT} in-flight workers.`);
@@ -1327,10 +1388,9 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       worker.output = "";
       worker.progress = "";
       worker.error = undefined;
-      worker.liveUsage = undefined;
-      worker.budgetWarningSent = false;
       worker.budgetStopReason = undefined;
       worker.terminalCandidate = undefined;
+      worker.resumeCount = (worker.resumeCount ?? 0) + 1;
       run.launchCount += 1;
       const early = earlyCompletions.get(resumedId);
       if (early) {
