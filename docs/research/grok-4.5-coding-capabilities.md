@@ -12,7 +12,13 @@
 
 **Verified:** Grok 4.5 is a generally available GitHub Copilot model. The authenticated Copilot model catalog identifies its exact model ID as `grok-4.5`, with picker enabled, `preview: false`, Responses API support, tool calls, parallel tool calls, structured outputs, vision, and configurable `low`/`medium`/`high` reasoning. [GitHub Copilot model catalog](https://api.githubcopilot.com/models) [GitHub supported-models documentation](https://docs.github.com/en/copilot/reference/ai-models/supported-models)
 
-**Recommendation:** Do **not** declare a blanket, provider-neutral replacement for `gpt-5.6-luna` yet. Do adopt `grok-4.5` as the **Copilot-specific explorer replacement**, and pilot it for mechanical and implementer work behind the repository's existing verification and review gates. The evidence is strong for repository Q&A, terminal agency, and agentic coding, but there is no public head-to-head Grok-vs-Luna task result, no official latency/error-rate comparison, and Grok has no `xhigh`/`max` effort equivalent. Those gaps matter because the current standard implementer route uses `xhigh`. [Current standard routing](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/core/models.md) [Current LB routing](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/lb/models.md)
+**Decision:** Do **not** declare a provider-neutral replacement for `gpt-5.6-luna`.
+Adopt `grok-4.5:high` for the GitHub Copilot low-budget mechanical, explorer,
+implementer, architect, and planner routes behind the existing verification and
+review gates. Keep the standard and OpenAI Codex matrices unchanged. Grok has no
+`xhigh`/`max` effort equivalent, so `high` is the exact supported replacement.
+[Current standard routing](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/core/models.md)
+[Current LB routing](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/lb/models.md)
 
 ## Identity and the Grok Code Fast 1 distinction
 
@@ -105,9 +111,12 @@ The current Pi runtime captures the parent provider, accepts `openai-codex` or `
 
 **Recommendation (inference):** retain semantic roles in the core protocol, but make the route selection key `(provider, variant, role, override)` and derive required models from that provider's matrix. Add provider capability metadata for allowed reasoning levels and tool contract. Preflight should reject an unavailable route before spawning, with no silent cross-provider fallback—the current no-fallback behavior is the safer policy. Record the resolved provider/model/effort in the board, as the repository already requires. [Core route-discipline documentation](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/core/models.md#route-discipline)
 
-## Proposed Copilot-only routing matrix
+## Copilot-only routing matrix
 
-This is a **proposal only**; production code was not changed. `grok-4.5` is the verified Copilot ID. The Grok `high` substitutions are intentional: Copilot exposes no `xhigh` or `max` for this model.
+`grok-4.5` is the verified Copilot ID. The Grok `high` substitutions are intentional:
+Copilot exposes no `xhigh` or `max` for this model. The low-budget matrix below was
+subsequently adopted with `high` effort for every Grok role; the standard matrix
+remains research context rather than the active standard routing.
 
 ### Standard profile
 
@@ -128,8 +137,8 @@ This is a **proposal only**; production code was not changed. `grok-4.5` is the 
 | Role / override | Proposed Copilot model | Effort | Notes |
 |---|---|---:|---|
 | Frontier | `gpt-5.6-sol` | medium | Preserve dispatch/triage model. |
-| Mechanical | `grok-4.5` | low | Costs more than Luna; validate whether quality offsets it. |
-| Explorer | `grok-4.5` | medium | Best cost-aware Copilot explorer setting. |
+| Mechanical | `grok-4.5` | high | Highest available Grok effort; validate whether quality offsets its cost. |
+| Explorer | `grok-4.5` | high | Favor repository understanding over minimum cost. |
 | Implementer | `grok-4.5` | high | Replaces Luna high; keep verify/review gates. |
 | Architect | `grok-4.5` | high | Copilot-only substitution for LB Luna. |
 | Reviewer | `gpt-5.6-sol` | low | Preserve independent review. |
@@ -139,6 +148,10 @@ This is a **proposal only**; production code was not changed. `grok-4.5` is the 
 
 The corresponding `openai-codex` matrix should remain on the existing Luna routes until a separate Codex-supported model is selected; do not put a Copilot-only Grok ID into a universal required-model list. [Existing standard matrix](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/core/models.md) [Existing LB matrix](https://github.com/PaoloDelCasale/copilot-minions/blob/06c1cf7758b1d14ed4d332e4bf38b471911da2ce/skills/lb/models.md)
 
-## Concise recommendation
+## Adopted low-budget decision
 
-Use `github-copilot/grok-4.5` for **explorer now**, and for mechanical/implementer only as a **Copilot-specific, verification-gated pilot**. Do not claim complete Luna replacement until a repository-local A/B test measures success-after-verification, retries, tool-call failures, wall time, and Copilot AI-credit cost across representative mechanical, explorer, and implementer tasks. Keep `openai-codex` provider routing separate and unchanged in the absence of an equivalent Codex model decision.
+Use `github-copilot/grok-4.5:high` for mechanical, explorer, implementer, architect,
+and planner routes behind the existing verification and review gates. Measure
+success-after-verification, retries, tool-call failures, wall time, and Copilot
+AI-credit cost against the previous Luna baseline. Keep `openai-codex` provider
+routing separate and unchanged in the absence of an equivalent Codex model decision.

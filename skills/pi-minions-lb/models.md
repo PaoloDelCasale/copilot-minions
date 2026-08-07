@@ -29,15 +29,14 @@ These role routes mirror the GitHub Copilot low-budget profile. Overrides:
 | Role | Model | Reasoning |
 |------|-------|-----------|
 | Frontier | `gpt-5.6-sol` | medium |
-| `mechanical` | `gpt-5.6-luna` | high |
-| `explorer` | `gpt-5.6-luna` | max |
-| `implementer` | `gpt-5.6-luna` | max |
-| `architect` | `gpt-5.6-luna` | max |
+| `mechanical` | `grok-4.5` | high |
+| `explorer` | `grok-4.5` | high |
+| `implementer` | `grok-4.5` | high |
+| `architect` | `grok-4.5` | high |
 | `reviewer` | `gpt-5.6-sol` | low |
-| `planner` | `gpt-5.6-luna` | max |
+| `planner` | `grok-4.5` | high |
 
-Overrides: `mechanical-judgment` uses `gpt-5.6-luna:max`; `escalate-entry`
-uses `grok-4.5:high`; `escalate-sol-low` uses `gpt-5.6-sol:low`;
+Overrides: `mechanical-judgment` and `escalate-entry` use `grok-4.5:high`; `escalate-sol-low` uses `gpt-5.6-sol:low`;
 `escalate-sol-medium` uses `gpt-5.6-sol:medium`.
 
 Terra, Sol high, and Sol max escalation routes are unavailable in this profile.
