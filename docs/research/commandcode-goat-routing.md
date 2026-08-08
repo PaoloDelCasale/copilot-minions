@@ -218,9 +218,9 @@ Register a dedicated `commandcode` provider.
 Candidate model IDs to verify against the live catalog during implementation:
 
 ```text
-openai/gpt-5.6-luna
+gpt-5.6-luna
 deepseek/deepseek-v4-flash
-moonshotai/kimi-k3
+moonshotai/Kimi-K3
 meta/muse-spark-1.2-contributor
 xai/grok-4.5
 ```
@@ -246,7 +246,7 @@ validation. Examples valid when explicitly requested by the user:
 
 ```text
 /minions usa deepseek/deepseek-v4-flash
-/minions usa moonshotai/kimi-k3
+/minions usa moonshotai/Kimi-K3
 /minions usa meta/muse-spark-1.2-contributor
 /minions usa xai/grok-4.5
 ```

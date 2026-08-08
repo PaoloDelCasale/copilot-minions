@@ -19,15 +19,15 @@ Grok are never used by automatic routes.
 
 | Role | Model | Reasoning |
 |------|-------|-----------|
-| Frontier | `openai/gpt-5.6-luna` | max |
+| Frontier | `gpt-5.6-luna` | max |
 | `mechanical` | `deepseek/deepseek-v4-flash` | max |
-| `explorer` | `openai/gpt-5.6-luna` | xhigh |
+| `explorer` | `gpt-5.6-luna` | xhigh |
 | `implementer` | `deepseek/deepseek-v4-flash` | max |
-| `architect` | `openai/gpt-5.6-luna` | max |
-| `reviewer` | `openai/gpt-5.6-luna` | max |
-| `planner` | `openai/gpt-5.6-luna` | max |
+| `architect` | `gpt-5.6-luna` | max |
+| `reviewer` | `gpt-5.6-luna` | max |
+| `planner` | `gpt-5.6-luna` | max |
 
-- **Kimi K3** (`moonshotai/kimi-k3`) is escalation-only: it is never a normal
+- **Kimi K3** (`moonshotai/Kimi-K3`) is escalation-only: it is never a normal
   architect/planner route. Use it only after a terminal/triaged worker result
   proves Luna/DeepSeek are insufficient (repeated failure, unresolved architecture
   conflict, serious design flaw). Its `$20` GOAT allowance (~980 requests/month)
@@ -68,11 +68,11 @@ Grok are never used by automatic routes.
 
 | Override | Model | Reasoning |
 |----------|-------|-----------|
-| `mechanical-judgment` | `openai/gpt-5.6-luna` | xhigh |
-| `escalate-entry` | `openai/gpt-5.6-luna` | max |
-| `escalate-sol-medium` | `openai/gpt-5.6-luna` | max |
-| `escalate-sol-high` | `moonshotai/kimi-k3` | max |
-| `escalate-sol-max` | `moonshotai/kimi-k3` | max |
+| `mechanical-judgment` | `gpt-5.6-luna` | xhigh |
+| `escalate-entry` | `gpt-5.6-luna` | max |
+| `escalate-sol-medium` | `gpt-5.6-luna` | max |
+| `escalate-sol-high` | `moonshotai/Kimi-K3` | max |
+| `escalate-sol-max` | `moonshotai/Kimi-K3` | max |
 
 Kimi K3 is reachable **only** through `escalate-sol-high`/`escalate-sol-max`, and
 only with a terminal/triaged worker result proving the need. `escalate-sol-low` is
