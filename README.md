@@ -236,7 +236,15 @@ a new explicit Goal.
 
 ## Standard model stacks
 
-Routing is provider-specific. OpenAI Codex (native and Pi) keeps its existing routes:
+Routing is provider-specific. CommandCode (Pi only) uses the GOAT plan with
+`CMD_API_KEY`; its standard matrix is centered on two models: frontier/explorer/
+architect/reviewer/planner `openai/gpt-5.6-luna` (`xhigh`/`max`) and
+mechanical/implementer `deepseek/deepseek-v4-flash:max`. Kimi K3 is escalation-only;
+Muse and Grok are manual overrides. See
+[`skills/pi-minions/models.md`](skills/pi-minions/models.md) and
+[`docs/research/commandcode-goat-routing.md`](docs/research/commandcode-goat-routing.md).
+
+OpenAI Codex (native and Pi) keeps its existing routes:
 
 | Role | Model | Reasoning |
 |------|-------|-----------|
@@ -275,16 +283,28 @@ failing the spawn, preventing retry loops from mutating semantic roles.
 
 ### Pi provider affinity and native-host runtime selection
 
-Starting either Pi skill captures the parent provider. Only `openai-codex` and
-`github-copilot` are accepted. The frontier switches to
-`<provider>/gpt-5.6-sol:medium`; workers use that provider's matrix while every model
-is qualified with the same provider. Required-model preflight and route lookup are
-provider-specific. At orchestration start, the runtime requires every exact catalog
-ID in the selected matrix—including the four-model GitHub Copilot standard stack—and
-directs users to upgrade Pi when a route is missing; there is no cross-provider or
-availability fallback. Installation does
-not require those models to be available. Closing the run restores the parent's
-original model and thinking level.
+Starting either Pi skill captures the parent provider. Accepted providers are
+`openai-codex`, `github-copilot`, and `commandcode` (CommandCode GOAT, expecting
+`CMD_API_KEY` in the environment). The frontier is matrix-driven: each provider/
+variant defines its own frontier instead of assuming `gpt-5.6-sol` globally (Codex and
+Copilot keep `<provider>/gpt-5.6-sol:medium`; CommandCode standard uses
+`<provider>/openai/gpt-5.6-luna:max` and lb uses `...:xhigh`). Workers use that
+provider's matrix while every model is qualified with the same provider.
+Required-model preflight and route lookup are provider-specific. At orchestration
+start, the runtime requires every `requiredModels` catalog ID for the active matrix
+and directs users to upgrade Pi when one is missing; `optionalModels` (Kimi/Muse/Grok
+for CommandCode) are available for explicit override/escalation only and their absence
+never blocks startup. There is no cross-provider or availability fallback.
+Installation does not require those models to be available. Closing the run restores
+the parent's original model and thinking level.
+
+CommandCode routing enforces two hard floors: **DeepSeek V4 Flash 0731 always runs at
+`max`** and **GPT-5.6 Luna never runs below `xhigh`**. Automatic routing is centered
+on DeepSeek (execution) and Luna (thinking/judgment); Kimi K3 is escalation-only and
+Muse/Grok are manual overrides. API/plan errors (401/403) and transient upstream
+failures surface as actionable CommandCode errors, not generic routing failures. See
+[`skills/core/model-rationale.md`](skills/core/model-rationale.md) and
+[`docs/research/commandcode-goat-routing.md`](docs/research/commandcode-goat-routing.md).
 
 Outside Paseo and Orca, workers use namespaced `pi-subagents` agents and explicit
 provider-qualified model routes. `pi-subagents` owns process lifecycle, FleetView,

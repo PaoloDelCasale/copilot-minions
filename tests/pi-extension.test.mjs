@@ -221,7 +221,9 @@ function createHarness({
   };
   const defaultCatalog = provider === "github-copilot"
     ? ["claude-opus-5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "grok-4.5"]
-    : ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+    : provider === "commandcode"
+      ? ["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash", "moonshotai/kimi-k3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"]
+      : ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
   const catalogs = modelCatalogs ?? { [provider]: defaultCatalog };
   const models = Object.entries(catalogs).flatMap(([catalogProvider, ids]) => ids
     .filter((id) => catalogProvider !== provider || !missingModels.includes(id))
@@ -1852,4 +1854,260 @@ test("handoff preservation keeps only listed Paseo workers out of disposal", asy
   assert.deepEqual(closed.details.disposedWorkerIds, [disposable.id]);
   assert.equal(closed.details.workerRetention, "preserve-for-handoff");
   assert.deepEqual(harness.appendedEntries.at(-1).data.workers.map((worker) => worker.disposition), ["preserved", "disposed"]);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #42: CommandCode GOAT provider routing with DeepSeek V4 Flash 0731 and
+// Muse fallback.
+// ---------------------------------------------------------------------------
+
+const COMMANDCODE_CATALOG = [
+  "openai/gpt-5.6-luna",
+  "deepseek/deepseek-v4-flash",
+  "moonshotai/kimi-k3",
+  "meta/muse-spark-1.2-contributor",
+  "xai/grok-4.5",
+];
+
+test("commandcode is accepted as a provider and start selects the matrix frontier", async () => {
+  const harness = createHarness({ provider: "commandcode" });
+  const result = await start(harness);
+
+  assert.match(result.content[0].text, /Provider Affinity commandcode/);
+  assert.deepEqual(harness.modelChanges, [{ provider: "commandcode", id: "openai/gpt-5.6-luna" }]);
+  assert.deepEqual(harness.thinkingChanges, ["max"]);
+  assert.equal(result.details.frontier, "openai/gpt-5.6-luna");
+  assert.equal(result.details.thinking, "max");
+
+  const lbHarness = createHarness({ provider: "commandcode" });
+  const lbResult = await start(lbHarness, "lb");
+  assert.equal(lbResult.details.frontier, "openai/gpt-5.6-luna");
+  assert.equal(lbResult.details.thinking, "xhigh");
+  assert.deepEqual(lbHarness.thinkingChanges, ["xhigh"]);
+});
+
+test("commandcode start preflights required vs optional models", async () => {
+  // Missing optional models (Kimi/Muse/Grok) is not fatal: the run still starts.
+  const optionalMissing = createHarness({
+    provider: "commandcode",
+    missingModels: ["moonshotai/kimi-k3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
+  });
+  const started = await start(optionalMissing);
+  assert.match(started.content[0].text, /Optional model\(s\) unavailable/);
+  assert.deepEqual(started.details.missingOptionalModels.sort(), [
+    "meta/muse-spark-1.2-contributor",
+    "moonshotai/kimi-k3",
+    "xai/grok-4.5",
+  ]);
+
+  // Missing DeepSeek (required) rejects the run.
+  const requiredMissing = createHarness({
+    provider: "commandcode",
+    missingModels: ["deepseek/deepseek-v4-flash"],
+  });
+  await assert.rejects(start(requiredMissing), /missing required model.*deepseek\/deepseek-v4-flash/);
+  assert.equal(requiredMissing.runtime.byMethod("ping").length, 0);
+});
+
+test("commandcode standard routes honor the Luna xhigh and DeepSeek max floors", async () => {
+  const cases = [
+    { role: "mechanical", expected: "commandcode/deepseek/deepseek-v4-flash:max" },
+    { role: "explorer", expected: "commandcode/openai/gpt-5.6-luna:xhigh" },
+    { role: "implementer", expected: "commandcode/deepseek/deepseek-v4-flash:max" },
+    { role: "architect", expected: "commandcode/openai/gpt-5.6-luna:max" },
+    { role: "reviewer", expected: "commandcode/openai/gpt-5.6-luna:max" },
+    { role: "planner", expected: "commandcode/openai/gpt-5.6-luna:max" },
+  ];
+  for (const entry of cases) {
+    const harness = createHarness({ provider: "commandcode" });
+    await start(harness);
+    await spawn(harness, [{
+      role: entry.role,
+      task: entry.role,
+      ...(["implementer", "architect"].includes(entry.role) ? { cwd: `/repo/.worktrees/${entry.role}` } : {}),
+    }]);
+    assert.equal(harness.runtime.byMethod("spawn")[0].params.model, entry.expected);
+  }
+});
+
+test("commandcode lb routes use DeepSeek max workhorse and Luna xhigh floors", async () => {
+  const cases = [
+    { role: "mechanical", expected: "commandcode/deepseek/deepseek-v4-flash:max" },
+    { role: "explorer", expected: "commandcode/deepseek/deepseek-v4-flash:max" },
+    { role: "implementer", expected: "commandcode/deepseek/deepseek-v4-flash:max" },
+    { role: "architect", expected: "commandcode/openai/gpt-5.6-luna:xhigh" },
+    { role: "reviewer", expected: "commandcode/openai/gpt-5.6-luna:xhigh" },
+    { role: "planner", expected: "commandcode/deepseek/deepseek-v4-flash:max" },
+  ];
+  for (const entry of cases) {
+    const harness = createHarness({ provider: "commandcode" });
+    await start(harness, "lb");
+    await spawn(harness, [{
+      role: entry.role,
+      task: entry.role,
+      ...(["implementer", "architect"].includes(entry.role) ? { cwd: `/repo/.worktrees/lb-${entry.role}` } : {}),
+    }]);
+    assert.equal(harness.runtime.byMethod("spawn")[0].params.model, entry.expected);
+  }
+});
+
+test("Muse and Grok are not used by any normal automatic route", async () => {
+  // LB implementer must be DeepSeek, never Muse, and no route may select Muse/Grok
+  // automatically even when they are present in the catalog.
+  const harness = createHarness({ provider: "commandcode" });
+  await start(harness, "lb");
+  const spawned = await spawn(harness, [{
+    role: "implementer",
+    task: "Implement",
+    cwd: "/repo/.worktrees/lb-implementer",
+  }]);
+  assert.equal(spawned.details.workers[0].model, "deepseek/deepseek-v4-flash");
+  assert.equal(harness.runtime.byMethod("spawn")[0].params.model, "commandcode/deepseek/deepseek-v4-flash:max");
+});
+
+test("CommandCode API/plan errors surface as actionable errors, not generic failures", async () => {
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method) {
+      if (method === "ping") return { runtime: "paseo", methods: ["ping", "status", "spawn", "steer", "stop", "resume"] };
+      if (method === "spawn") throw new Error("401 unauthorized: CMD_API_KEY is invalid");
+      if (method === "status") return { text: "State: running", details: { snapshot: { status: "running" } } };
+      if (method === "stop") return { state: "stopping" };
+      throw new Error(`Unexpected Paseo method ${method}`);
+    },
+  };
+  const harness = createHarness({
+    provider: "commandcode",
+    dependencies: {
+      paseoRuntime,
+      setWatchdogInterval: () => ({ unref() {} }),
+      clearWatchdogInterval: () => {},
+    },
+  });
+  await start(harness);
+  await assert.rejects(spawn(harness, [{
+    role: "mechanical",
+    task: "Bounded task",
+  }]), /CommandCode rejected the API key\/plan \(401\/403\).*CMD_API_KEY/i);
+});
+
+test("CommandCode transient upstream failures surface as actionable retry guidance", async () => {
+  const paseoRuntime = {
+    kind: "paseo",
+    async call(method) {
+      if (method === "ping") return { runtime: "paseo", methods: ["ping", "status", "spawn", "steer", "stop", "resume"] };
+      if (method === "spawn") throw new Error("upstream 503 temporarily unavailable");
+      if (method === "status") return { text: "State: running", details: { snapshot: { status: "running" } } };
+      if (method === "stop") return { state: "stopping" };
+      throw new Error(`Unexpected Paseo method ${method}`);
+    },
+  };
+  const harness = createHarness({
+    provider: "commandcode",
+    dependencies: {
+      paseoRuntime,
+      setWatchdogInterval: () => ({ unref() {} }),
+      clearWatchdogInterval: () => {},
+    },
+  });
+  await start(harness);
+  await assert.rejects(spawn(harness, [{
+    role: "mechanical",
+    task: "Bounded task",
+  }]), /CommandCode upstream is rate-limited or temporarily unavailable.*retry shortly/i);
+});
+
+test("explicit deepseek/meta/moonshotai/xai model overrides are authorized from raw input", async () => {
+  const cases = [
+    { id: "deepseek/deepseek-v4-flash" },
+    { id: "moonshotai/kimi-k3" },
+    { id: "meta/muse-spark-1.2-contributor" },
+    { id: "xai/grok-4.5" },
+  ];
+  for (const entry of cases) {
+    const harness = createHarness({ provider: "commandcode" });
+    await start(harness, "standard", `/skill:pi-minions usa ${entry.id} per il prossimo batch`);
+    const result = await spawn(harness, [{
+      role: "reviewer",
+      task: "Review with override",
+      modelOverride: entry.id,
+    }]);
+    assert.equal(result.details.workers[0].modelOverride, entry.id);
+    const spawnedModel = harness.runtime.byMethod("spawn")[0].params.model;
+    assert.match(spawnedModel, new RegExp(`commandcode/${entry.id}:`));
+  }
+});
+
+test("unauthorized model overrides are still rejected and downgraded", async () => {
+  const harness = createHarness({ provider: "commandcode" });
+  await start(harness);
+  const result = await spawn(harness, [{
+    role: "mechanical",
+    task: "Use unrequested model",
+    modelOverride: "openai/gpt-5.6-luna",
+  }]);
+  assert.equal(result.details.workers[0].modelOverride, undefined);
+  assert.match(result.details.workers[0].modelOverrideRejection, /not explicitly requested by the user/i);
+  assert.equal(harness.runtime.byMethod("spawn")[0].params.model, "commandcode/deepseek/deepseek-v4-flash:max");
+});
+
+test("CommandCode model budget/watchdog profiles apply to every new model", async () => {
+  const cases = [
+    { role: "mechanical", model: "deepseek/deepseek-v4-flash", max: 60, warning: 40, duration: 210 * 60, goatAllowanceUsd: 60, goatMeterFactor: 70 / 60 },
+    { role: "explorer", model: "openai/gpt-5.6-luna", max: 24, warning: 16, duration: 180 * 60, goatAllowanceUsd: 70, goatMeterFactor: 1.0 },
+    { role: "planner", model: "openai/gpt-5.6-luna", max: 24, warning: 16, duration: 180 * 60, goatAllowanceUsd: 70, goatMeterFactor: 1.0 },
+  ];
+  for (const entry of cases) {
+    const harness = createHarness({ provider: "commandcode" });
+    await start(harness);
+    const spawned = await spawn(harness, [{ role: entry.role, task: entry.role }]);
+    assert.equal(spawned.details.workers[0].model, entry.model);
+    assert.equal(spawned.details.workers[0].maxCostUsd, entry.max);
+    assert.equal(spawned.details.workers[0].warningCostUsd, entry.warning);
+    assert.equal(spawned.details.workers[0].maxDurationSeconds, entry.duration);
+    assert.equal(harness.appendedEntries.at(-1).data.workers[0].maxCostUsd, entry.max);
+  }
+
+  // GOAT-aware metadata is available for all CommandCode models without assuming a
+  // shared $70 pool (Kimi/Muse/Grok are $20-allowance and erode the meter ~3.5x).
+  const budgets = createHarness({ provider: "commandcode" });
+  await start(budgets);
+  const worker = (await spawn(budgets, [{ role: "mechanical", task: "budget" }])).details.workers[0];
+  assert.equal(worker.model, "deepseek/deepseek-v4-flash");
+  assert.equal(budgets.appendedEntries.at(-1).data.workers[0].model, "deepseek/deepseek-v4-flash");
+});
+
+test("model lock restores the configured CommandCode frontier during an active run", async () => {
+  const harness = createHarness({ provider: "commandcode" });
+  await start(harness);
+  await harness.handlers.get("model_select")({ model: { provider: "commandcode", id: "deepseek/deepseek-v4-flash" } }, harness.ctx);
+  harness.handlers.get("thinking_level_select")({ level: "high" }, harness.ctx);
+  assert.deepEqual(harness.modelChanges.at(-1), { provider: "commandcode", id: "openai/gpt-5.6-luna" });
+  assert.equal(harness.thinkingChanges.at(-1), "max");
+
+  const lb = createHarness({ provider: "commandcode" });
+  await start(lb, "lb");
+  await lb.handlers.get("model_select")({ model: { provider: "commandcode", id: "deepseek/deepseek-v4-flash" } }, lb.ctx);
+  lb.handlers.get("thinking_level_select")({ level: "high" }, lb.ctx);
+  assert.deepEqual(lb.modelChanges.at(-1), { provider: "commandcode", id: "openai/gpt-5.6-luna" });
+  assert.equal(lb.thinkingChanges.at(-1), "xhigh");
+});
+
+test("CommandCode start warns when CMD_API_KEY is missing and never persists it", async () => {
+  const previous = process.env.CMD_API_KEY;
+  delete process.env.CMD_API_KEY;
+  try {
+    const harness = createHarness({ provider: "commandcode" });
+    const started = await start(harness);
+    const keyNotification = harness.notifications.find((n) => /CMD_API_KEY/.test(n.message));
+    assert.equal(Boolean(keyNotification), true);
+    assert.match(keyNotification.message, /api\.commandcode\.ai/); // help text mentions the endpoint
+    // The key is never persisted in state or spawn payloads.
+    const serialized = JSON.stringify(harness.appendedEntries);
+    assert.equal(serialized.includes("CMD_API_KEY"), false);
+    assert.equal(started.details.frontier, "openai/gpt-5.6-luna");
+  } finally {
+    if (previous === undefined) delete process.env.CMD_API_KEY;
+    else process.env.CMD_API_KEY = previous;
+  }
 });

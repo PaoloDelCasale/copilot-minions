@@ -1,10 +1,42 @@
 # Pi standard model routing
 
 Pi selects exactly one matrix from the captured parent provider. Required-model
-preflight and route lookup use only that provider's catalog; there is no fallback.
-Run start requires every exact route ID for the active provider; installation does
-not. If Pi does not expose every model in the selected matrix, the run is rejected
-rather than substituting another model.
+preflight and route lookup use only that provider's catalog; there is no fallback
+across providers. Run start requires every `requiredModels` ID for the active
+provider; `optionalModels` are available for explicit override/escalation only and
+missing optional models never block startup. The frontier is matrix-driven: each
+provider/variant defines its own frontier instead of assuming `gpt-5.6-sol`
+globally.
+
+## `commandcode`
+
+CommandCode runs on the GOAT plan and expects `CMD_API_KEY` in the environment
+(endpoint `https://api.commandcode.ai/provider/v1/chat/completions`). Hard routing
+floors: **DeepSeek V4 Flash 0731 always runs at `max`** and **GPT-5.6 Luna never
+runs below `xhigh`**. Automatic routing is centered on only two models: Luna for
+thinking/architecture/planning/review and DeepSeek for execution. Kimi, Muse, and
+Grok are never used by automatic routes.
+
+| Role | Model | Reasoning |
+|------|-------|-----------|
+| Frontier | `openai/gpt-5.6-luna` | max |
+| `mechanical` | `deepseek/deepseek-v4-flash` | max |
+| `explorer` | `openai/gpt-5.6-luna` | xhigh |
+| `implementer` | `deepseek/deepseek-v4-flash` | max |
+| `architect` | `openai/gpt-5.6-luna` | max |
+| `reviewer` | `openai/gpt-5.6-luna` | max |
+| `planner` | `openai/gpt-5.6-luna` | max |
+
+- **Kimi K3** (`moonshotai/kimi-k3`) is escalation-only: it is never a normal
+  architect/planner route. Use it only after a terminal/triaged worker result
+  proves Luna/DeepSeek are insufficient (repeated failure, unresolved architecture
+  conflict, serious design flaw). Its `$20` GOAT allowance (~980 requests/month)
+  makes it too expensive for routine use.
+- **Muse Spark 1.2 Contributor** (`meta/muse-spark-1.2-contributor`) and
+  **Grok 4.5** (`xai/grok-4.5`) are manual/experimental override models only. They
+  are never used automatically: normalized for the GOAT meter their effective
+  consumption is worse than DeepSeek's while their benchmark gain is modest, and
+  Muse still shows intermittent upstream availability errors.
 
 ## `openai-codex`
 
@@ -32,6 +64,20 @@ rather than substituting another model.
 
 ## Named overrides
 
+### `commandcode`
+
+| Override | Model | Reasoning |
+|----------|-------|-----------|
+| `mechanical-judgment` | `openai/gpt-5.6-luna` | xhigh |
+| `escalate-entry` | `openai/gpt-5.6-luna` | max |
+| `escalate-sol-medium` | `openai/gpt-5.6-luna` | max |
+| `escalate-sol-high` | `moonshotai/kimi-k3` | max |
+| `escalate-sol-max` | `moonshotai/kimi-k3` | max |
+
+Kimi K3 is reachable **only** through `escalate-sol-high`/`escalate-sol-max`, and
+only with a terminal/triaged worker result proving the need. `escalate-sol-low` is
+unavailable in this profile (Luna never runs below `xhigh`).
+
 ### `openai-codex`
 
 | Override | Model | Reasoning |
@@ -53,9 +99,12 @@ rather than substituting another model.
 | `escalate-sol-max` | `gpt-5.6-sol` | max |
 
 Every spawn pins provider, model, and effort. A user-requested model may override the
-model for the next batch only; it must exist under the captured provider. The runtime
+model for the next batch only; it must exist under the captured provider. Model-ID
+validation is provider/catalog-driven: `openai/...`, `deepseek/...`, `meta/...`,
+`moonshotai/...`, and `xai/...` IDs are all valid when authorized. The runtime
 derives this authorization from raw user input and audits/downgrades any unauthorized
-`modelOverride` to the normal role route.
+`modelOverride` to the normal role route. Muse/Grok/Kimi overrides are explicit user
+requests only and never change automatic routing.
 
 Normal dispatch omits every override field. `mechanical-judgment` requires a
 mechanical merge-conflict or GitHub judgment reason. Every escalation requires a
