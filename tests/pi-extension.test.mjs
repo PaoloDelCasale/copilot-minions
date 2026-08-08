@@ -2111,3 +2111,29 @@ test("CommandCode start warns when CMD_API_KEY is missing and never persists it"
     else process.env.CMD_API_KEY = previous;
   }
 });
+
+test("the bare /minions command authorizes start when sent through the input handler", async () => {
+  // Paseo forwards the raw "/minions ..." message to the input handler without
+  // dispatching the registered command; the handler must still authorize start.
+  const harness = createHarness();
+  const result = harness.handlers.get("input")({
+    source: "interactive",
+    text: "/minions Verifica che il provider sia attivo e fai un test",
+  });
+  assert.equal(result.action, "transform");
+  assert.equal(result.text, "/skill:pi-minions Verifica che il provider sia attivo e fai un test");
+  const started = await execute(harness.tools.get("minions_start"), { variant: "standard" }, harness.ctx);
+  assert.match(started.content[0].text, /Started standard orchestration with Provider Affinity openai-codex/);
+});
+
+test("the bare /minions-lb command authorizes the low-budget start through the input handler", async () => {
+  const harness = createHarness();
+  const result = harness.handlers.get("input")({
+    source: "interactive",
+    text: "/minions-lb pianifica a basso costo",
+  });
+  assert.equal(result.action, "transform");
+  assert.equal(result.text, "/skill:pi-minions-lb pianifica a basso costo");
+  const started = await execute(harness.tools.get("minions_start"), { variant: "lb" }, harness.ctx);
+  assert.match(started.content[0].text, /Started lb orchestration with Provider Affinity openai-codex/);
+});

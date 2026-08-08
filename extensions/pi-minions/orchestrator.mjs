@@ -63,6 +63,11 @@ const ROLE_AGENTS = {
 };
 const MINIONS_OPT_OUT = /(?:^|\s)(?:\/direct\b|skip\s+(?:minions|workers)\b|senza\s+minions?\b|non\s+usare\s+minions?\b)/i;
 const MINIONS_SKILL_COMMAND = /^\/skill:(pi|paseo|codex)-minions(-lb)?(?=\s|$)/;
+// Also accept the bare /minions and /minions-lb commands. In plain Pi CLI these
+// are registered slash commands handled by registerCommand; in a Paseo-hosted
+// session the raw message reaches the input handler without that dispatch, so
+// the handler must recognize them directly too.
+const MINIONS_BARE_COMMAND = /^\/minions(-lb)?(?=\s|$)/;
 // Provider-qualified model IDs (gpt-5.6-luna, deepseek/deepseek-v4-flash,
 // meta/muse-spark-1.2-contributor, moonshotai/Kimi-K3, xai/grok-4.5) plus legacy
 // bare IDs such as gpt-5.3-codex. Authorization is validated against the selected
@@ -91,13 +96,26 @@ function explicitlyRequestedModels(text) {
 }
 
 function slashSkill(text) {
-  const match = typeof text === "string" ? text.match(MINIONS_SKILL_COMMAND) : undefined;
-  if (!match) return undefined;
-  return {
-    variant: match[2] ? "lb" : "standard",
-    canonicalName: `pi-minions${match[2] ?? ""}`,
-    matchedName: match[0].slice("/skill:".length),
-  };
+  if (typeof text !== "string") return undefined;
+  const skill = text.match(MINIONS_SKILL_COMMAND);
+  if (skill) {
+    return {
+      variant: skill[2] ? "lb" : "standard",
+      canonicalName: `pi-minions${skill[2] ?? ""}`,
+      matchedName: skill[0].slice("/skill:".length),
+      bare: false,
+    };
+  }
+  const bare = text.match(MINIONS_BARE_COMMAND);
+  if (bare) {
+    return {
+      variant: bare[1] ? "lb" : "standard",
+      canonicalName: `pi-minions${bare[1] ?? ""}`,
+      matchedName: bare[0].slice(1),
+      bare: true,
+    };
+  }
+  return undefined;
 }
 
 function resolveMatrix(provider, variant) {
@@ -1743,6 +1761,15 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       pendingSlashVariant = skill.variant;
       pendingModelOverrideAuthorizations = requestedModels;
       minionsRoutingRequired = true;
+      if (skill.bare) {
+        // Rewrite /minions -> /skill:pi-minions so the rest of the turn (and the
+        // agent instructions) see the canonical form, while keeping the args.
+        const suffix = event.text.slice(skill.matchedName.length + 1).trim();
+        return {
+          action: "transform",
+          text: `/skill:${skill.canonicalName}${suffix ? ` ${suffix}` : ""}`,
+        };
+      }
       if (skill.matchedName !== skill.canonicalName) {
         return {
           action: "transform",
