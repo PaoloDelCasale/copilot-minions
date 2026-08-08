@@ -20,3 +20,27 @@ The frontier remains Sol medium because it owns decomposition and user decisions
 Unlike the source configuration, this profile does not split validation into a
 separate agent or make review selective.
 
+## CommandCode low-budget
+
+CommandCode lb (GOAT plan, `CMD_API_KEY`) maximizes throughput for small/medium
+tasks while keeping independent judgment where it matters. DeepSeek V4 Flash 0731
+does most of the work and always runs at `max`; GPT-5.6 Luna provides the minimum
+independent judgment and never runs below `xhigh`.
+
+| Role | Model | Effort |
+|------|-------|--------|
+| Frontier | `gpt-5.6-luna` | xhigh |
+| `mechanical` | `deepseek/deepseek-v4-flash` | max |
+| `explorer` | `deepseek/deepseek-v4-flash` | max |
+| `implementer` | `deepseek/deepseek-v4-flash` | max |
+| `architect` | `gpt-5.6-luna` | xhigh |
+| `reviewer` | `gpt-5.6-luna` | xhigh |
+| `planner` | `deepseek/deepseek-v4-flash` | max |
+
+Escalation: Luna `max`, then Kimi K3 (`moonshotai/Kimi-K3`) `max` only after a
+terminal/triaged worker result proves the need. Kimi, Muse Contributor, and Grok
+are never used by automatic routes; Muse and Grok remain manual/experimental
+overrides while their GOAT allowance and reliability make automatic routing
+unattractive. See
+[`../docs/research/commandcode-goat-routing.md`](../docs/research/commandcode-goat-routing.md).
+
