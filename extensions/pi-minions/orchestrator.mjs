@@ -6,7 +6,7 @@ import path from "node:path";
 import { createPaseoRuntimeFromProcess } from "./paseo-runtime.mjs";
 import { createOrcaRuntimeFromProcess } from "./orca-runtime.mjs";
 
-const SUPPORTED_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
+const SUPPORTED_PROVIDERS = new Set(["openai-codex", "github-copilot", "commandcode"]);
 const SUPPORTED_VARIANTS = new Set(["standard", "lb"]);
 const SUPPORTED_RUNTIMES = new Set(["pi-subagents", "paseo", "orca"]);
 const SUBAGENTS_RPC_VERSION = 1;
@@ -32,13 +32,28 @@ const WRITER_ROLES = new Set(["implementer", "architect"]);
 const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
 const DEFAULT_RUN_COST_CEILING_USD = 160;
+// GOAT plan allowance is plan-specific and does not map 1:1 to public API token
+// pricing. Keep conservative model-aware safety floors: DeepSeek is the intended
+// high-volume workhorse and receives the broadest allowance, while Kimi and Grok
+// stay tightly controlled because their GOAT capacity is much lower.
+// GOAT-aware budget metadata: goatAllowanceUsd is the model's effective monthly
+// GOAT allowance and goatMeterFactor = 70 / allowance is how fast the shared $70
+// meter erodes relative to Luna. A $20-allowance model erodes the meter much
+// faster than Luna despite a low nominal token price, so routing must never be
+// based on token list price alone.
 const MODEL_BUDGETS = {
   "claude-opus-5": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 240 * 60 },
   "gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60 },
   "gpt-5.6-sol": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 150 * 60 },
   "gpt-5.6-terra": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 180 * 60 },
   "grok-4.5": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 180 * 60 },
+  "openai/gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60, goatAllowanceUsd: 70, goatMeterFactor: 1.0 },
+  "deepseek/deepseek-v4-flash": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 210 * 60, goatAllowanceUsd: 60, goatMeterFactor: 70 / 60 },
+  "moonshotai/kimi-k3": { warningCostUsd: 8, maxCostUsd: 12, maxDurationSeconds: 120 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
+  "meta/muse-spark-1.2-contributor": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
+  "xai/grok-4.5": { warningCostUsd: 8, maxCostUsd: 12, maxDurationSeconds: 120 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
 };
+const COMMANDCODE_PROVIDER_HELP = "The CommandCode provider uses GOAT plan capacity and expects CMD_API_KEY in the environment. The API endpoint is https://api.commandcode.ai/provider/v1/chat/completions.";
 const REQUIRED_RPC_METHODS = ["ping", "status", "spawn", "steer", "stop", "resume"];
 const ROLE_AGENTS = {
   mechanical: "pi-minions-mechanical",
@@ -50,7 +65,11 @@ const ROLE_AGENTS = {
 };
 const MINIONS_OPT_OUT = /(?:^|\s)(?:\/direct\b|skip\s+(?:minions|workers)\b|senza\s+minions?\b|non\s+usare\s+minions?\b)/i;
 const MINIONS_SKILL_COMMAND = /^\/skill:(pi|paseo|codex)-minions(-lb)?(?=\s|$)/;
-const MODEL_ID = /\b(?:gpt|claude|grok)-[a-z0-9][a-z0-9._-]*\b/gi;
+// Provider-qualified model IDs (openai/gpt-5.6-luna, deepseek/deepseek-v4-flash,
+// meta/muse-spark-1.2-contributor, moonshotai/kimi-k3, xai/grok-4.5) plus legacy
+// bare IDs such as gpt-5.3-codex. Authorization is validated against the selected
+// provider's catalog, never by prefix alone.
+const MODEL_ID = /\b(?:(?:openai|deepseek|meta|moonshotai|xai)\/[a-z0-9][a-z0-9._/-]*|[a-z0-9][a-z0-9._-]*)\b/gi;
 const MODEL_REQUEST = /\b(?:use|using|choose|select|force|route|run|spawn|dispatch|prefer|want|usa|usare|utilizza|utilizzare|scegli|scegliere|seleziona|selezionare|forza|forzare|instrada|instradare|preferisco|voglio)\b/i;
 const NEGATED_MODEL_REQUEST = /\b(?:do\s+not|don't|never|avoid|non\s+(?:usare|utilizzare|voglio)|senza\s+(?:usare|utilizzare)|evita(?:re)?)\b/i;
 const MODEL_REQUEST_BOUNDARIES = [".", "!", "?", ";", "\n"];
@@ -83,9 +102,30 @@ function slashSkill(text) {
   };
 }
 
+function resolveMatrix(provider, variant) {
+  return PROVIDER_MATRICES[provider]?.[variant];
+}
+
+function matrixFrontier(matrix) {
+  const [model, thinking] = matrix?.frontier ?? ["gpt-5.6-sol", "medium"];
+  return { model, thinking };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Provider/variant routing matrices. Each matrix may define:
+//   frontier: [modelId, thinkingLevel] used by minions_start and the model lock
+//   requiredModels: run cannot start without these
+//   optionalModels: available for explicit override/escalation; missing is not fatal
+//   routes: { role: [modelId, thinkingLevel] }
+//   overrides: named route overrides (escalations)
+// Existing openai-codex and github-copilot behavior is intentionally unchanged.
 const PROVIDER_MATRICES = {
   "openai-codex": {
     standard: {
+      frontier: ["gpt-5.6-sol", "medium"],
       requiredModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
       routes: {
         mechanical: ["gpt-5.6-luna", "low"],
@@ -104,6 +144,7 @@ const PROVIDER_MATRICES = {
       },
     },
     lb: {
+      frontier: ["gpt-5.6-sol", "medium"],
       requiredModels: ["gpt-5.6-sol", "gpt-5.6-luna"],
       routes: {
         mechanical: ["gpt-5.6-luna", "high"],
@@ -123,6 +164,7 @@ const PROVIDER_MATRICES = {
   },
   "github-copilot": {
     standard: {
+      frontier: ["gpt-5.6-sol", "medium"],
       requiredModels: [
         "claude-opus-5",
         "gpt-5.6-luna",
@@ -146,6 +188,7 @@ const PROVIDER_MATRICES = {
       },
     },
     lb: {
+      frontier: ["gpt-5.6-sol", "medium"],
       requiredModels: ["gpt-5.6-sol", "grok-4.5"],
       routes: {
         mechanical: ["grok-4.5", "high"],
@@ -160,6 +203,55 @@ const PROVIDER_MATRICES = {
         "escalate-entry": ["grok-4.5", "high"],
         "escalate-sol-low": ["gpt-5.6-sol", "low"],
         "escalate-sol-medium": ["gpt-5.6-sol", "medium"],
+      },
+    },
+  },
+  // CommandCode GOAT: routing centered on two models for medium/high usage.
+  // DeepSeek V4 Flash 0731 is the high-volume workhorse and always runs at max.
+  // GPT-5.6 Luna handles judgment/frontier/review/architecture and never runs
+  // below xhigh. Kimi K3 is escalation-only (never a normal route). Muse and Grok
+  // are manual/explicit override models only: they are never used by automatic
+  // routes and are never required for startup.
+  "commandcode": {
+    standard: {
+      frontier: ["openai/gpt-5.6-luna", "max"],
+      requiredModels: ["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash"],
+      optionalModels: ["moonshotai/kimi-k3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
+      routes: {
+        mechanical: ["deepseek/deepseek-v4-flash", "max"],
+        explorer: ["openai/gpt-5.6-luna", "xhigh"],
+        implementer: ["deepseek/deepseek-v4-flash", "max"],
+        architect: ["openai/gpt-5.6-luna", "max"],
+        reviewer: ["openai/gpt-5.6-luna", "max"],
+        planner: ["openai/gpt-5.6-luna", "max"],
+      },
+      overrides: {
+        "mechanical-judgment": ["openai/gpt-5.6-luna", "xhigh"],
+        "escalate-entry": ["openai/gpt-5.6-luna", "max"],
+        "escalate-sol-medium": ["openai/gpt-5.6-luna", "max"],
+        "escalate-sol-high": ["moonshotai/kimi-k3", "max"],
+        "escalate-sol-max": ["moonshotai/kimi-k3", "max"],
+      },
+    },
+    lb: {
+      frontier: ["openai/gpt-5.6-luna", "xhigh"],
+      requiredModels: ["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash"],
+      optionalModels: ["moonshotai/kimi-k3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
+      routes: {
+        mechanical: ["deepseek/deepseek-v4-flash", "max"],
+        explorer: ["deepseek/deepseek-v4-flash", "max"],
+        implementer: ["deepseek/deepseek-v4-flash", "max"],
+        architect: ["openai/gpt-5.6-luna", "xhigh"],
+        reviewer: ["openai/gpt-5.6-luna", "xhigh"],
+        planner: ["deepseek/deepseek-v4-flash", "max"],
+      },
+      overrides: {
+        "mechanical-judgment": ["deepseek/deepseek-v4-flash", "max"],
+        "escalate-entry": ["openai/gpt-5.6-luna", "xhigh"],
+        "escalate-sol-low": ["openai/gpt-5.6-luna", "xhigh"],
+        "escalate-sol-medium": ["openai/gpt-5.6-luna", "max"],
+        "escalate-sol-high": ["moonshotai/kimi-k3", "max"],
+        "escalate-sol-max": ["moonshotai/kimi-k3", "max"],
       },
     },
   },
@@ -713,7 +805,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
   }
 
   function resolveWorkerRoute(spec, ctx) {
-    const matrix = PROVIDER_MATRICES[run.provider]?.[run.variant];
+    const matrix = resolveMatrix(run.provider, run.variant);
     const roleRoute = matrix?.routes[spec.role];
     if (!roleRoute) throw new Error(`Unknown worker role: ${spec.role}`);
     let rejection = routeOverrideRejection(spec);
@@ -737,7 +829,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const modelOverride = requestedModelOverride && !modelOverrideRejection
       ? requestedModelOverride
       : undefined;
-    const modelId = modelOverride || defaultModel;
+    // Resolve the model: an explicit user-requested override wins, otherwise the
+    // role route. Every model must exist under the captured provider's catalog.
+    let modelId = modelOverride || defaultModel;
+    let routeThinking = thinking;
     if (!ctx.modelRegistry.find(run.provider, modelId)) {
       throw new Error(`Provider ${run.provider} does not offer requested model ${modelId}.`);
     }
@@ -755,7 +850,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
     const timeoutSecondsIgnored = run.runtime !== "pi-subagents" && spec.timeoutSeconds !== undefined;
     return {
       modelId,
-      thinking,
+      thinking: routeThinking,
       cwd,
       canonicalCwd: normalizeGitPath("/", cwd),
       maxCostUsd,
@@ -796,6 +891,46 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       },
     };
   }
+
+  function commandCodeErrorKind(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/\b(?:429|rate\s*limit|too\s*many\s*requests)\b/i.test(message)) return "rate-limit";
+    if (/\b(?:502|503|504|upstream|unavailable|temporarily|transient)\b/i.test(message)) return "transient";
+    if (/\b(?:401|403|unauthor|forbidden|upgrade_required|api[\s_-]*key)\b/i.test(message)) return "auth";
+    if (/\b(?:model|not\s*found|404)\b/i.test(message)) return "missing-model";
+    return "other";
+  }
+
+  // Surface actionable CommandCode API/plan errors instead of generic routing
+  // failures. 401 invalid key, 403 plan/access restriction, missing model, and
+  // transient upstream failures get a clear classification.
+  function describeCommandCodeError(error) {
+    if (run?.provider !== "commandcode") return undefined;
+    const kind = commandCodeErrorKind(error);
+    if (kind === "auth") {
+      return "CommandCode rejected the API key/plan (401/403). Verify CMD_API_KEY and GOAT Provider API access.";
+    }
+    if (kind === "missing-model") {
+      return "CommandCode reported a missing model. Verify the model ID against the live CommandCode catalog.";
+    }
+    if (kind === "rate-limit" || kind === "transient") {
+      return "CommandCode upstream is rate-limited or temporarily unavailable; retry shortly.";
+    }
+    return undefined;
+  }
+
+  function preflightProviderModels(matrix, ctx, provider) {
+    const hasModel = (id) => Boolean(ctx.modelRegistry.find(provider, id));
+    const required = (matrix.requiredModels ?? []).filter((id) => !hasModel(id));
+    const optional = (matrix.optionalModels ?? []).filter((id) => !hasModel(id));
+    return {
+      missingRequired: required,
+      missingOptional: optional,
+      presentRequired: (matrix.requiredModels ?? []).filter(hasModel),
+      presentOptional: (matrix.optionalModels ?? []).filter(hasModel),
+    };
+  }
+
 
   function registerSpawnedWorker(data, task, route, ctx) {
     const worker = {
@@ -1132,7 +1267,7 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
       if (!ctx.isProjectTrusted()) throw new Error("Pi minions requires a trusted project.");
       const provider = ctx.model?.provider;
       if (!SUPPORTED_PROVIDERS.has(provider)) {
-        throw new Error(`Unsupported provider: ${provider ?? "none"}. Select openai-codex or github-copilot.`);
+        throw new Error(`Unsupported provider: ${provider ?? "none"}. Select openai-codex, github-copilot, or commandcode.`);
       }
       if (run) {
         if (run.provider !== provider || run.variant !== variant) {
@@ -1145,16 +1280,24 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         });
       }
       const matrix = PROVIDER_MATRICES[provider][variant];
-      const missing = matrix.requiredModels.filter((id) => !ctx.modelRegistry.find(provider, id));
-      if (missing.length > 0) throw new Error(`Provider ${provider} is missing required model(s): ${missing.join(", ")}`);
+      const preflight = preflightProviderModels(matrix, ctx, provider);
+      if (preflight.missingRequired.length > 0) {
+        throw new Error(`Provider ${provider} is missing required model(s): ${preflight.missingRequired.join(", ")}`);
+      }
       const selectedRuntime = runtimeKind();
       const selectedRuntimeInfo = await ensureRuntime();
 
-      const frontier = ctx.modelRegistry.find(provider, "gpt-5.6-sol");
+      // Matrix-driven frontier: each provider/variant defines its own frontier
+      // instead of assuming gpt-5.6-sol globally.
+      const { model: frontierModel, thinking: frontierThinking } = matrixFrontier(matrix);
+      const frontier = ctx.modelRegistry.find(provider, frontierModel);
       const originalModel = ctx.model;
       const originalThinking = pi.getThinkingLevel();
-      if (!(await pi.setModel(frontier))) throw new Error(`Unable to select ${provider}/gpt-5.6-sol.`);
-      pi.setThinkingLevel("medium");
+      if (!(await pi.setModel(frontier))) throw new Error(`Unable to select ${provider}/${frontierModel}.`);
+      pi.setThinkingLevel(frontierThinking);
+      if (provider === "commandcode" && !process.env.CMD_API_KEY) {
+        ctx.ui?.notify?.(`${COMMANDCODE_PROVIDER_HELP}`, "warning");
+      }
       pendingSlashVariant = undefined;
       run = {
         id: idFactory(),
@@ -1181,13 +1324,18 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         : selectedRuntime === "orca"
           ? "Orca native orchestration"
           : "pi-subagents RPC v1";
-      return textResult(`Started ${variant} orchestration with Provider Affinity ${provider} on ${runtimeLabel}.`, {
+      const missingOptionalNotice = preflight.missingOptional.length > 0
+        ? ` Optional model(s) unavailable (available only for explicit override/escalation): ${preflight.missingOptional.join(", ")}.`
+        : "";
+      return textResult(`Started ${variant} orchestration with Provider Affinity ${provider} on ${runtimeLabel}.${missingOptionalNotice}`, {
         runId: run.id,
         provider,
         variant,
-        frontier: "gpt-5.6-sol",
-        thinking: "medium",
+        frontier: frontierModel,
+        thinking: frontierThinking,
         runtime: selectedRuntime,
+        missingOptionalModels: preflight.missingOptional,
+        presentOptionalModels: preflight.presentOptional,
       });
     },
   });
@@ -1222,6 +1370,10 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         .filter(({ result }) => result.status === "fulfilled" && result.value?.details?.asyncId);
       const failure = settled.find((result) => result.status === "rejected" || !result.value?.details?.asyncId);
       if (failure) {
+        const reason = failure.status === "rejected"
+          ? failure.reason
+          : new Error(`${run.runtime} spawn reply did not include a worker run id.`);
+        const commandCodeNote = describeCommandCodeError(failure.status === "rejected" ? failure.reason : undefined);
         const workers = launched.map(({ result, index }) => registerSpawnedWorker(result.value, tasks[index], routes[index], ctx));
         run.launchCount += workers.length;
         for (const worker of workers) {
@@ -1233,9 +1385,11 @@ export function createPiMinionsExtension(pi, dependencies = {}) {
         persistRun();
         await Promise.allSettled(workers.map((worker) => runtimeCall("stop", runtimeTarget(worker))));
         persistRun();
-        const reason = failure.status === "rejected"
-          ? failure.reason
-          : new Error(`${run.runtime} spawn reply did not include a worker run id.`);
+        if (commandCodeNote) {
+          const actionable = new Error(`${reason instanceof Error ? reason.message : String(reason)} — ${commandCodeNote}`);
+          actionable.cause = reason;
+          throw actionable;
+        }
         throw reason;
       }
 
@@ -1641,23 +1795,26 @@ Minions is strictly slash-command-only. Never infer, select, or start Minions fr
   pi.on("model_select", async (event, ctx) => {
     lastContext = ctx;
     if (!run || changingModel) return;
-    if (event.model.provider === run.provider && event.model.id === "gpt-5.6-sol") return;
-    const frontier = ctx.modelRegistry.find(run.provider, "gpt-5.6-sol");
+    const { model: frontierModel, thinking: frontierThinking } = matrixFrontier(resolveMatrix(run.provider, run.variant));
+    if (event.model.provider === run.provider && event.model.id === frontierModel) return;
+    const frontier = ctx.modelRegistry.find(run.provider, frontierModel);
     changingModel = true;
     try {
       await pi.setModel(frontier);
-      pi.setThinkingLevel("medium");
+      pi.setThinkingLevel(frontierThinking);
     } finally {
       changingModel = false;
     }
-    ctx.ui?.notify?.(`Model locked to ${run.provider}/gpt-5.6-sol:medium while Pi minions is active.`, "warning");
+    ctx.ui?.notify?.(`Model locked to ${run.provider}/${frontierModel}:${frontierThinking} while Pi minions is active.`, "warning");
   });
 
   pi.on("thinking_level_select", (event, ctx) => {
     lastContext = ctx;
-    if (!run || changingModel || event.level === "medium") return;
-    pi.setThinkingLevel("medium");
-    ctx.ui?.notify?.("Thinking level locked to medium while Pi minions is active.", "warning");
+    if (!run || changingModel) return;
+    const { thinking: frontierThinking } = matrixFrontier(resolveMatrix(run.provider, run.variant));
+    if (event.level === frontierThinking) return;
+    pi.setThinkingLevel(frontierThinking);
+    ctx.ui?.notify?.(`Thinking level locked to ${frontierThinking} while Pi minions is active.`, "warning");
   });
 
   pi.on("session_start", (_event, ctx) => {

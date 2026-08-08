@@ -17,7 +17,9 @@ uses Orca's native Run/Task/Dispatch and terminal lifecycle through the public `
 CLI. Workers are visible as supervised Orca workers and run in the Orca-managed
 worktree selected by `cwd`; ordinary `pi-subagents` is not used.
 
-Never pass a provider. Normal dispatch omits `modelOverride`, `routeOverride`,
+Never pass a provider. Accepted providers are `openai-codex`, `github-copilot`, and
+`commandcode` (CommandCode GOAT, expects `CMD_API_KEY`). Normal dispatch omits
+`modelOverride`, `routeOverride`,
 `overrideReason`, and `overrideFromWorkerId`. Pass `modelOverride` only when the user
 explicitly requested that exact model for the next batch; the runtime audits and
 downgrades any unauthorized value to role routing. A named route must carry the structured judgment or

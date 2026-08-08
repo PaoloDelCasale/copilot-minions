@@ -17,10 +17,16 @@ uses Orca's native Run/Task/Dispatch and terminal lifecycle through the public `
 CLI. Workers are visible as supervised Orca workers and run in the Orca-managed
 worktree selected by `cwd`; ordinary `pi-subagents` is not used.
 
-Never pass a provider. Normal dispatch omits `modelOverride`, `routeOverride`,
-`overrideReason`, and `overrideFromWorkerId`. Pass `modelOverride` only when the user
-explicitly requested that exact model for the next batch; the runtime audits and
-downgrades any unauthorized value to role routing. A named route must carry the structured judgment or
+Never pass a provider. Accepted providers are `openai-codex`, `github-copilot`, and
+`commandcode` (CommandCode GOAT, expects `CMD_API_KEY`). Normal dispatch omits
+`modelOverride`, `routeOverride`, `overrideReason`, and `overrideFromWorkerId`. Pass
+`modelOverride` only when the user explicitly requested that exact model for the next
+batch; the runtime audits and downgrades any unauthorized value to role routing, and
+validates model IDs against the provider's catalog (including `openai/...`,
+`deepseek/...`, `meta/...`, `moonshotai/...`, `xai/...`). CommandCode enforces hard
+floors: DeepSeek V4 Flash 0731 always runs at `max`, GPT-5.6 Luna never runs below
+`xhigh`. Automatic CommandCode routing uses only Luna and DeepSeek; Kimi K3 is
+escalation-only and Muse/Grok are manual overrides. A named route must carry the structured judgment or
 prior-worker evidence required by [`control.md`](control.md); complexity alone never
 qualifies. Invalid named overrides are audited and downgraded to the normal role route
 so a frontier cannot evade routing by changing worker roles after a rejected spawn.
