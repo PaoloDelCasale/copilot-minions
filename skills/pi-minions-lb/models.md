@@ -15,12 +15,12 @@ independent judgment needed to keep quality high.
 
 | Role | Model | Reasoning |
 |------|-------|-----------|
-| Frontier | `openai/gpt-5.6-luna` | xhigh |
+| Frontier | `gpt-5.6-luna` | xhigh |
 | `mechanical` | `deepseek/deepseek-v4-flash` | max |
 | `explorer` | `deepseek/deepseek-v4-flash` | max |
 | `implementer` | `deepseek/deepseek-v4-flash` | max |
-| `architect` | `openai/gpt-5.6-luna` | xhigh |
-| `reviewer` | `openai/gpt-5.6-luna` | xhigh |
+| `architect` | `gpt-5.6-luna` | xhigh |
+| `reviewer` | `gpt-5.6-luna` | xhigh |
 | `planner` | `deepseek/deepseek-v4-flash` | max |
 
 - **Muse Spark 1.2 Contributor** is not an automatic route: normalized for the GOAT
@@ -32,9 +32,9 @@ independent judgment needed to keep quality high.
 - **Grok 4.5** is a manual override only, never automatic.
 
 Overrides: `mechanical-judgment` uses `deepseek/deepseek-v4-flash` at `max`;
-`escalate-entry` uses `openai/gpt-5.6-luna` at `xhigh`; `escalate-sol-low` uses
-`openai/gpt-5.6-luna` at `xhigh`; `escalate-sol-medium` uses `openai/gpt-5.6-luna`
-at `max`; `escalate-sol-high`/`escalate-sol-max` use `moonshotai/kimi-k3` at `max`
+`escalate-entry` uses `gpt-5.6-luna` at `xhigh`; `escalate-sol-low` uses
+`gpt-5.6-luna` at `xhigh`; `escalate-sol-medium` uses `gpt-5.6-luna`
+at `max`; `escalate-sol-high`/`escalate-sol-max` use `moonshotai/Kimi-K3` at `max`
 (escalation-only).
 
 ## `openai-codex`

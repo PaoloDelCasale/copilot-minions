@@ -42,10 +42,10 @@ The default policy until new benchmark/capacity data suggests otherwise:
   requests/month**, making it the right model for the majority of
   implementation/exploration/mechanical work.
 - **GPT-5.6 Luna handles judgment/frontier/review/architecture and never runs below
-  `xhigh`** (`openai/gpt-5.6-luna`). Its full `$70` allowance makes it the right
+  `xhigh`** (`gpt-5.6-luna`). Its full `$70` allowance makes it the right
   model when the worker's main value is deciding what to do, understanding large
   repository context, or validating DeepSeek output.
-- **Kimi K3 is escalation-only** (`moonshotai/kimi-k3`). It is the strongest model
+- **Kimi K3 is escalation-only** (`moonshotai/Kimi-K3`). It is the strongest model
   but its `$20` allowance (~980 requests/month) makes routine use too expensive. Use
   it only after a terminal/triaged worker result proves Luna is insufficient:
   repeated implementation failure, verification failure after retry, unresolved

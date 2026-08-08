@@ -32,24 +32,22 @@ const WRITER_ROLES = new Set(["implementer", "architect"]);
 const DEFAULT_WATCHDOG_INTERVAL_MS = 15_000;
 const DEFAULT_PASEO_ERROR_SETTLE_MS = 120_000;
 const DEFAULT_RUN_COST_CEILING_USD = 160;
-// GOAT plan allowance is plan-specific and does not map 1:1 to public API token
-// pricing. Keep conservative model-aware safety floors: DeepSeek is the intended
-// high-volume workhorse and receives the broadest allowance, while Kimi and Grok
-// stay tightly controlled because their GOAT capacity is much lower.
 // GOAT-aware budget metadata: goatAllowanceUsd is the model's effective monthly
 // GOAT allowance and goatMeterFactor = 70 / allowance is how fast the shared $70
 // meter erodes relative to Luna. A $20-allowance model erodes the meter much
 // faster than Luna despite a low nominal token price, so routing must never be
-// based on token list price alone.
+// based on token list price alone. Keep conservative model-aware safety floors:
+// DeepSeek is the intended high-volume workhorse and receives the broadest
+// allowance, while Kimi and Grok stay tightly controlled because their GOAT
+// capacity is much lower.
 const MODEL_BUDGETS = {
   "claude-opus-5": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 240 * 60 },
-  "gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60 },
+  "gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60, goatAllowanceUsd: 70, goatMeterFactor: 1.0 },
   "gpt-5.6-sol": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 150 * 60 },
   "gpt-5.6-terra": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 180 * 60 },
   "grok-4.5": { warningCostUsd: 24, maxCostUsd: 40, maxDurationSeconds: 180 * 60 },
-  "openai/gpt-5.6-luna": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60, goatAllowanceUsd: 70, goatMeterFactor: 1.0 },
   "deepseek/deepseek-v4-flash": { warningCostUsd: 40, maxCostUsd: 60, maxDurationSeconds: 210 * 60, goatAllowanceUsd: 60, goatMeterFactor: 70 / 60 },
-  "moonshotai/kimi-k3": { warningCostUsd: 8, maxCostUsd: 12, maxDurationSeconds: 120 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
+  "moonshotai/Kimi-K3": { warningCostUsd: 8, maxCostUsd: 12, maxDurationSeconds: 120 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
   "meta/muse-spark-1.2-contributor": { warningCostUsd: 16, maxCostUsd: 24, maxDurationSeconds: 180 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
   "xai/grok-4.5": { warningCostUsd: 8, maxCostUsd: 12, maxDurationSeconds: 120 * 60, goatAllowanceUsd: 20, goatMeterFactor: 70 / 20 },
 };
@@ -65,8 +63,8 @@ const ROLE_AGENTS = {
 };
 const MINIONS_OPT_OUT = /(?:^|\s)(?:\/direct\b|skip\s+(?:minions|workers)\b|senza\s+minions?\b|non\s+usare\s+minions?\b)/i;
 const MINIONS_SKILL_COMMAND = /^\/skill:(pi|paseo|codex)-minions(-lb)?(?=\s|$)/;
-// Provider-qualified model IDs (openai/gpt-5.6-luna, deepseek/deepseek-v4-flash,
-// meta/muse-spark-1.2-contributor, moonshotai/kimi-k3, xai/grok-4.5) plus legacy
+// Provider-qualified model IDs (gpt-5.6-luna, deepseek/deepseek-v4-flash,
+// meta/muse-spark-1.2-contributor, moonshotai/Kimi-K3, xai/grok-4.5) plus legacy
 // bare IDs such as gpt-5.3-codex. Authorization is validated against the selected
 // provider's catalog, never by prefix alone.
 const MODEL_ID = /\b(?:(?:openai|deepseek|meta|moonshotai|xai)\/[a-z0-9][a-z0-9._/-]*|[a-z0-9][a-z0-9._-]*)\b/gi;
@@ -214,44 +212,44 @@ const PROVIDER_MATRICES = {
   // routes and are never required for startup.
   "commandcode": {
     standard: {
-      frontier: ["openai/gpt-5.6-luna", "max"],
-      requiredModels: ["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash"],
-      optionalModels: ["moonshotai/kimi-k3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
+      frontier: ["gpt-5.6-luna", "max"],
+      requiredModels: ["gpt-5.6-luna", "deepseek/deepseek-v4-flash"],
+      optionalModels: ["moonshotai/Kimi-K3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
       routes: {
         mechanical: ["deepseek/deepseek-v4-flash", "max"],
-        explorer: ["openai/gpt-5.6-luna", "xhigh"],
+        explorer: ["gpt-5.6-luna", "xhigh"],
         implementer: ["deepseek/deepseek-v4-flash", "max"],
-        architect: ["openai/gpt-5.6-luna", "max"],
-        reviewer: ["openai/gpt-5.6-luna", "max"],
-        planner: ["openai/gpt-5.6-luna", "max"],
+        architect: ["gpt-5.6-luna", "max"],
+        reviewer: ["gpt-5.6-luna", "max"],
+        planner: ["gpt-5.6-luna", "max"],
       },
       overrides: {
-        "mechanical-judgment": ["openai/gpt-5.6-luna", "xhigh"],
-        "escalate-entry": ["openai/gpt-5.6-luna", "max"],
-        "escalate-sol-medium": ["openai/gpt-5.6-luna", "max"],
-        "escalate-sol-high": ["moonshotai/kimi-k3", "max"],
-        "escalate-sol-max": ["moonshotai/kimi-k3", "max"],
+        "mechanical-judgment": ["gpt-5.6-luna", "xhigh"],
+        "escalate-entry": ["gpt-5.6-luna", "max"],
+        "escalate-sol-medium": ["gpt-5.6-luna", "max"],
+        "escalate-sol-high": ["moonshotai/Kimi-K3", "max"],
+        "escalate-sol-max": ["moonshotai/Kimi-K3", "max"],
       },
     },
     lb: {
-      frontier: ["openai/gpt-5.6-luna", "xhigh"],
-      requiredModels: ["openai/gpt-5.6-luna", "deepseek/deepseek-v4-flash"],
-      optionalModels: ["moonshotai/kimi-k3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
+      frontier: ["gpt-5.6-luna", "xhigh"],
+      requiredModels: ["gpt-5.6-luna", "deepseek/deepseek-v4-flash"],
+      optionalModels: ["moonshotai/Kimi-K3", "meta/muse-spark-1.2-contributor", "xai/grok-4.5"],
       routes: {
         mechanical: ["deepseek/deepseek-v4-flash", "max"],
         explorer: ["deepseek/deepseek-v4-flash", "max"],
         implementer: ["deepseek/deepseek-v4-flash", "max"],
-        architect: ["openai/gpt-5.6-luna", "xhigh"],
-        reviewer: ["openai/gpt-5.6-luna", "xhigh"],
+        architect: ["gpt-5.6-luna", "xhigh"],
+        reviewer: ["gpt-5.6-luna", "xhigh"],
         planner: ["deepseek/deepseek-v4-flash", "max"],
       },
       overrides: {
         "mechanical-judgment": ["deepseek/deepseek-v4-flash", "max"],
-        "escalate-entry": ["openai/gpt-5.6-luna", "xhigh"],
-        "escalate-sol-low": ["openai/gpt-5.6-luna", "xhigh"],
-        "escalate-sol-medium": ["openai/gpt-5.6-luna", "max"],
-        "escalate-sol-high": ["moonshotai/kimi-k3", "max"],
-        "escalate-sol-max": ["moonshotai/kimi-k3", "max"],
+        "escalate-entry": ["gpt-5.6-luna", "xhigh"],
+        "escalate-sol-low": ["gpt-5.6-luna", "xhigh"],
+        "escalate-sol-medium": ["gpt-5.6-luna", "max"],
+        "escalate-sol-high": ["moonshotai/Kimi-K3", "max"],
+        "escalate-sol-max": ["moonshotai/Kimi-K3", "max"],
       },
     },
   },

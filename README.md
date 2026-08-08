@@ -238,7 +238,7 @@ a new explicit Goal.
 
 Routing is provider-specific. CommandCode (Pi only) uses the GOAT plan with
 `CMD_API_KEY`; its standard matrix is centered on two models: frontier/explorer/
-architect/reviewer/planner `openai/gpt-5.6-luna` (`xhigh`/`max`) and
+architect/reviewer/planner `gpt-5.6-luna` (`xhigh`/`max`) and
 mechanical/implementer `deepseek/deepseek-v4-flash:max`. Kimi K3 is escalation-only;
 Muse and Grok are manual overrides. See
 [`skills/pi-minions/models.md`](skills/pi-minions/models.md) and
@@ -288,7 +288,7 @@ Starting either Pi skill captures the parent provider. Accepted providers are
 `CMD_API_KEY` in the environment). The frontier is matrix-driven: each provider/
 variant defines its own frontier instead of assuming `gpt-5.6-sol` globally (Codex and
 Copilot keep `<provider>/gpt-5.6-sol:medium`; CommandCode standard uses
-`<provider>/openai/gpt-5.6-luna:max` and lb uses `...:xhigh`). Workers use that
+`<provider>/gpt-5.6-luna:max` and lb uses `...:xhigh`). Workers use that
 provider's matrix while every model is qualified with the same provider.
 Required-model preflight and route lookup are provider-specific. At orchestration
 start, the runtime requires every `requiredModels` catalog ID for the active matrix
